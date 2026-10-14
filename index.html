@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Einstein Wallpaper — Hat Tile Studio</title>
+<meta name="description" content="Generate aperiodic Einstein tile (hat) wallpapers: any size, ratio, palette and animation. Export PNG or WebM for Windows / Android live wallpapers.">
+<link rel="stylesheet" href="css/style.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%230b1020'/%3E%3Cpath d='M8 10 L14 6 L20 10 L26 8 L26 16 L20 22 L12 24 L8 18 Z' fill='%235bc8ff'/%3E%3C/svg%3E">
+</head>
+<body>
+<div id="app">
+
+  <aside id="sidebar">
+    <header>
+      <div class="logo">
+        <span class="logo-hat"></span>
+        <div>
+          <h1>Einstein Wallpaper</h1>
+          <p class="sub">aperiodic hat-tile studio</p>
+        </div>
+      </div>
+      <div class="actions">
+        <button id="randomBtn" class="btn primary" title="Random look (R)">🎲 Randomize</button>
+      </div>
+    </header>
+
+    <div id="controls">
+
+      <details open>
+        <summary>Canvas</summary>
+        <div class="body">
+          <div class="row">
+            <label>Aspect ratio</label>
+            <div id="aspectChips" class="chips"></div>
+          </div>
+          <div class="row two">
+            <div>
+              <label>Orientation</label>
+              <div class="chips">
+                <button class="chip" data-orient="landscape">Landscape</button>
+                <button class="chip" data-orient="portrait">Portrait</button>
+              </div>
+            </div>
+          </div>
+          <div class="row">
+            <label for="resSelect">Resolution preset</label>
+            <select id="resSelect"></select>
+          </div>
+          <div class="row two">
+            <div>
+              <label for="resW">Width</label>
+              <input type="number" id="resW" min="64" max="8192">
+            </div>
+            <div>
+              <label for="resH">Height</label>
+              <input type="number" id="resH" min="64" max="8192">
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <details open>
+        <summary>Pattern</summary>
+        <div class="body">
+          <div class="row">
+            <label>Tile scale <output id="tileSizeVal"></output></label>
+            <input type="range" id="tileSize" min="10" max="120" step="1">
+          </div>
+          <div class="row">
+            <label for="variantSelect">Pattern variant</label>
+            <select id="variantSelect"></select>
+          </div>
+          <div class="row">
+            <label>Rotation <output id="rotationVal"></output></label>
+            <input type="range" id="rotation" min="0" max="345" step="15">
+          </div>
+          <div class="row">
+            <label>Gap between tiles <output id="gapVal"></output></label>
+            <input type="range" id="gap" min="0" max="10" step="1">
+          </div>
+          <div class="row">
+            <label>Outline width <output id="outlineWidthVal"></output></label>
+            <input type="range" id="outlineWidth" min="0" max="4" step="0.1">
+          </div>
+          <div class="row">
+            <label>Seed <output id="seedVal"></output></label>
+            <input type="range" id="seed" min="1" max="99999" step="1">
+          </div>
+        </div>
+      </details>
+
+      <details open>
+        <summary>Colors</summary>
+        <div class="body">
+          <div class="row">
+            <label>Color mode</label>
+            <select id="modeSelect"></select>
+          </div>
+          <div class="row">
+            <label>Palette <span class="hint" id="palName"></span></label>
+            <div id="paletteGrid" class="swatches"></div>
+          </div>
+          <div class="row two">
+            <label class="check"><input type="checkbox" id="lineAuto" checked> Auto outline</label>
+            <input type="color" id="lineColor" value="#101014">
+          </div>
+        </div>
+      </details>
+
+      <details open>
+        <summary>Animation</summary>
+        <div class="body">
+          <div class="row">
+            <label for="animSelect">Effect</label>
+            <select id="animSelect"></select>
+          </div>
+          <div class="row">
+            <label>Speed <output id="animSpeedVal"></output></label>
+            <input type="range" id="animSpeed" min="0.2" max="3" step="0.1">
+          </div>
+        </div>
+      </details>
+
+      <details open>
+        <summary>Export &amp; live wallpaper</summary>
+        <div class="body">
+          <div class="btnrow">
+            <button id="pngBtn" class="btn">⬇ PNG (full res)</button>
+            <button id="recordBtn" class="btn">⏺ Record WebM</button>
+          </div>
+          <div class="row">
+            <label for="recDuration">Recording length</label>
+            <select id="recDuration">
+              <option value="5">5 seconds</option>
+              <option value="10" selected>10 seconds</option>
+              <option value="15">15 seconds</option>
+              <option value="30">30 seconds</option>
+            </select>
+          </div>
+          <p class="help">
+            <b>Windows:</b> install <i>Lively Wallpaper</i> (free) → Add Wallpaper →
+            paste this page's URL (web wallpaper), or drop the exported
+            <i>.webm</i> file in as a video wallpaper.<br>
+            <b>Android:</b> export a WebM/MP4 with the animation you like and set it
+            with any “video live wallpaper” app, or use Wallpaper Engine.
+          </p>
+        </div>
+      </details>
+
+      <details>
+        <summary>About</summary>
+        <div class="body">
+          <p class="help">
+            This studio renders the aperiodic monotile discovered in 2023 by
+            David Smith et al. — the “hat” — using the metatile substitution
+            construction from their paper <i>An Aperiodic Monotile</i>
+            (arXiv:2303.10798). Every wallpaper is a patch of a tiling that
+            never repeats.
+          </p>
+          <div class="btnrow">
+            <button id="fsBtn" class="btn">⛶ Fullscreen</button>
+            <button id="resetBtn" class="btn ghost">Reset</button>
+          </div>
+        </div>
+      </details>
+
+    </div>
+  </aside>
+
+  <main id="stage">
+    <div id="canvasWrap"><canvas id="preview"></canvas></div>
+    <div id="status">…</div>
+  </main>
+
+</div>
+<script src="js/hat-tiling.js"></script>
+<script src="js/palettes.js"></script>
+<script src="js/render.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
