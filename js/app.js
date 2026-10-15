@@ -752,15 +752,17 @@
         save();
       };
     };
-    fxBind('fxBlur', 'blur', 'fxBlurVal', (v) => v + ' px');
-    fxBind('fxGlow', 'glow', 'fxGlowVal', (v) => Math.round(v) + '%');
-    fxBind('fxGlowRadius', 'glowRadius', 'fxGlowRadiusVal', (v) => v + ' px');
-    fxBind('fxShadow', 'shadow', 'fxShadowVal', (v) => Math.round(v) + '%');
-    fxBind('fxShadowSoft', 'shadowSoft', 'fxShadowSoftVal', (v) => v + ' px');
-    fxBind('fxShadowOff', 'shadowOff', 'fxShadowOffVal', (v) => v + ' px');
-    fxBind('fxGrain', 'grain', 'fxGrainVal', (v) => Math.round(v) + '%');
-    fxBind('fxVignette', 'vignette', 'fxVignetteVal', (v) => Math.round(v) + '%');
-    $('fxVignetteMode').onchange = (e) => { P.effects.vignetteMode = e.target.value; refresh(); save(); };
+    // `true` = recompose immediately on input (post-processing only, the
+    // painted scene canvas is reused, so this is cheap and gives live feedback)
+    fxBind('fxBlur', 'blur', 'fxBlurVal', (v) => v + ' px', true);
+    fxBind('fxGlow', 'glow', 'fxGlowVal', (v) => Math.round(v) + '%', true);
+    fxBind('fxGlowRadius', 'glowRadius', 'fxGlowRadiusVal', (v) => v + ' px', true);
+    fxBind('fxShadow', 'shadow', 'fxShadowVal', (v) => Math.round(v) + '%', true);
+    fxBind('fxShadowSoft', 'shadowSoft', 'fxShadowSoftVal', (v) => v + ' px', true);
+    fxBind('fxShadowOff', 'shadowOff', 'fxShadowOffVal', (v) => v + ' px', true);
+    fxBind('fxGrain', 'grain', 'fxGrainVal', (v) => Math.round(v) + '%', true);
+    fxBind('fxVignette', 'vignette', 'fxVignetteVal', (v) => Math.round(v) + '%', true);
+    $('fxVignetteMode').onchange = (e) => { P.effects.vignetteMode = e.target.value; composeFrame(performance.now()); save(); };
 
     // palette editor
     $('palEditSelect').onchange = (e) => {

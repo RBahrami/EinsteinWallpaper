@@ -11,8 +11,13 @@
  *   5. vignette: cached radial gradient, darken or lighten
  *
  * All offscreen buffers are pooled and only resized when dimensions change.
- * Effect settings: { blur, glow, glowRadius, shadow, shadowSoft, shadowOff,
- *                    grain, vignette, vignetteMode }  (0 = disabled/neutral)
+ * Effect settings (0 = disabled/neutral):
+ *   blur, glowRadius, shadowSoft, shadowOff — pixels
+ *   glow, shadow, grain, vignette           — 0–100 percent, normalized
+ *                                             here to a 0–1 alpha so slider
+ *                                             position maps linearly to
+ *                                             effect strength
+ *   vignetteMode                            — 'dark' | 'light'
  */
 (function (root) {
   'use strict';
@@ -66,12 +71,17 @@
    */
   function compose(targetCtx, sceneCanvas, W, H, look, fx, overlayFn) {
     fx = fx || {};
+    // Percent-scale settings arrive as 0–100 (slider units); normalize them to
+    // 0–1 alphas so the sliders modulate strength continuously instead of
+    // acting as on/off switches.
     const blur = +fx.blur || 0;
-    const glow = +fx.glow || 0;
+    const glow = Math.min(1, (+fx.glow || 0) / 100);
     const glowRadius = +fx.glowRadius || 12;
-    const shadow = +fx.shadow || 0;
+    const shadow = Math.min(0.9, (+fx.shadow || 0) / 100);
     const shadowSoft = +fx.shadowSoft || 14;
     const shadowOff = +fx.shadowOff || 8;
+    const grain = Math.min(1, (+fx.grain || 0) / 100);
+    const vignette = Math.min(1, (+fx.vignette || 0) / 100);
 
     paintBackground(targetCtx, W, H, look, fx);
 
@@ -79,7 +89,7 @@
     targetCtx.save();
     if (blur > 0) targetCtx.filter = `blur(${blur}px)`;
     if (shadow > 0) {
-      targetCtx.shadowColor = `rgba(0,0,0,${Math.min(0.9, shadow)})`;
+      targetCtx.shadowColor = `rgba(0,0,0,${shadow})`;
       targetCtx.shadowBlur = shadowSoft;
       targetCtx.shadowOffsetX = shadowOff;
       targetCtx.shadowOffsetY = shadowOff;
@@ -101,10 +111,10 @@
     if (overlayFn) overlayFn(targetCtx);
 
     // grain
-    if (fx.grain > 0) {
+    if (grain > 0) {
       targetCtx.save();
       targetCtx.globalCompositeOperation = 'overlay';
-      targetCtx.globalAlpha = Math.min(1, fx.grain);
+      targetCtx.globalAlpha = grain;
       const pat = targetCtx.createPattern(getGrain(), 'repeat');
       targetCtx.fillStyle = pat;
       targetCtx.fillRect(0, 0, W, H);
@@ -112,12 +122,12 @@
     }
 
     // vignette
-    if (fx.vignette > 0) {
+    if (vignette > 0) {
       targetCtx.save();
       const light = fx.vignetteMode === 'light';
       const inner = light ? 0.55 : 0.25;
       const grad = targetCtx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * inner, W / 2, H / 2, Math.hypot(W, H) / 2);
-      const a = Math.min(1, fx.vignette);
+      const a = vignette;
       if (light) {
         grad.addColorStop(0, 'rgba(255,255,255,0)');
         grad.addColorStop(1, `rgba(255,244,220,${a * 0.75})`);
