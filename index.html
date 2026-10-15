@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Einstein Wallpaper — Hat Tile Studio</title>
-<meta name="description" content="Generate aperiodic Einstein tile (hat) wallpapers: any size, ratio, palette and animation. Export PNG or WebM for Windows / Android live wallpapers.">
+<title>Einstein Wallpaper — Geometric Wallpaper Studio</title>
+<meta name="description" content="Geometric wallpaper studio: the aperiodic Einstein hat tile plus 13 more tiling families, custom palettes and gradients, visual effects, animations. Export PNG or record WebM live wallpapers.">
 <link rel="stylesheet" href="css/style.css">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%230b1020'/%3E%3Cpath d='M8 10 L14 6 L20 10 L26 8 L26 16 L20 22 L12 24 L8 18 Z' fill='%235bc8ff'/%3E%3C/svg%3E">
 </head>
@@ -16,8 +16,8 @@
       <div class="logo">
         <span class="logo-hat"></span>
         <div>
-          <h1>Einstein Wallpaper</h1>
-          <p class="sub">aperiodic hat-tile studio</p>
+          <h1>Geometric Studio</h1>
+          <p class="sub">Einstein hat &amp; 13 tiling families</p>
         </div>
       </div>
       <div class="actions">
@@ -61,25 +61,29 @@
       </details>
 
       <details open>
-        <summary>Pattern</summary>
+        <summary>Tiling</summary>
         <div class="body">
           <div class="row">
-            <label>Tile scale <output id="tileSizeVal"></output></label>
-            <input type="range" id="tileSize" min="10" max="120" step="1">
+            <label>Tiling family</label>
+            <div id="familyGrid" class="famgrid" role="listbox" aria-label="Tiling family"></div>
           </div>
           <div class="row">
             <label for="variantSelect">Pattern variant</label>
             <select id="variantSelect"></select>
           </div>
           <div class="row">
+            <label>Tile scale <output id="tileSizeVal"></output></label>
+            <input type="range" id="tileSize" min="10" max="120" step="1">
+          </div>
+          <div class="row">
             <label>Rotation <output id="rotationVal"></output></label>
             <input type="range" id="rotation" min="0" max="345" step="15">
           </div>
-          <div class="row">
+          <div class="row" id="gapRow">
             <label>Gap between tiles <output id="gapVal"></output></label>
             <input type="range" id="gap" min="0" max="10" step="1">
           </div>
-          <div class="row">
+          <div class="row" id="outlineRow">
             <label>Outline width <output id="outlineWidthVal"></output></label>
             <input type="range" id="outlineWidth" min="0" max="4" step="0.1">
           </div>
@@ -94,8 +98,24 @@
         <summary>Colors</summary>
         <div class="body">
           <div class="row">
-            <label>Color mode</label>
+            <label for="modeSelect">Color mode</label>
             <select id="modeSelect"></select>
+          </div>
+          <div class="row two">
+            <div>
+              <label for="colorSource">Color source</label>
+              <select id="colorSource">
+                <option value="palette">Palette</option>
+                <option value="gradient">Gradient</option>
+              </select>
+            </div>
+            <div>
+              <label for="bgSource">Background</label>
+              <select id="bgSource">
+                <option value="palette">Solid (palette)</option>
+                <option value="gradient">Gradient</option>
+              </select>
+            </div>
           </div>
           <div class="row">
             <label>Palette <span class="hint" id="palName"></span></label>
@@ -103,8 +123,154 @@
           </div>
           <div class="row two">
             <label class="check"><input type="checkbox" id="lineAuto" checked> Auto outline</label>
-            <input type="color" id="lineColor" value="#101014">
+            <input type="color" id="lineColor" value="#101014" title="Manual outline color">
           </div>
+        </div>
+      </details>
+
+      <details>
+        <summary>Palette editor</summary>
+        <div class="body">
+          <div class="row">
+            <label for="palEditSelect">Editing</label>
+            <select id="palEditSelect"></select>
+          </div>
+          <div class="row">
+            <label for="palEditName">Name</label>
+            <input type="text" id="palEditName" maxlength="60" placeholder="Palette name">
+          </div>
+          <div class="row">
+            <label>Colors <span class="hint" id="palEditCount"></span></label>
+            <div id="palEditColors" class="stoplist"></div>
+            <div class="btnrow tight">
+              <button id="palAddColor" class="btn mini">+ Color</button>
+            </div>
+          </div>
+          <div class="row two">
+            <div>
+              <label for="palEditBg">Background</label>
+              <input type="color" id="palEditBg" value="#0b1020">
+            </div>
+            <div>
+              <label for="palEditOutline">Outline (auto if empty)</label>
+              <div class="outlinerow">
+                <input type="color" id="palEditOutline" value="#101014">
+                <button id="palEditOutlineAuto" class="btn mini" title="Use automatic outline color">Auto</button>
+              </div>
+            </div>
+          </div>
+          <div class="row">
+            <label>Preview</label>
+            <div id="palEditPreview" class="gpreview"></div>
+          </div>
+          <div class="btnrow">
+            <button id="palSave" class="btn">💾 Save</button>
+            <button id="palDuplicate" class="btn">⧉ Duplicate</button>
+          </div>
+          <div class="btnrow">
+            <button id="palNew" class="btn">＋ New from current</button>
+            <button id="palDelete" class="btn ghost">🗑 Delete</button>
+          </div>
+          <div class="btnrow">
+            <button id="themeExport" class="btn">⬆ Export themes</button>
+            <button id="themeImport" class="btn">⬇ Import themes</button>
+            <input type="file" id="themeFile" accept=".json,application/json" hidden>
+          </div>
+          <p class="help">Custom palettes persist in your browser and can be
+            exported/imported as JSON theme files (palettes + gradients).</p>
+        </div>
+      </details>
+
+      <details>
+        <summary>Gradient editor</summary>
+        <div class="body">
+          <div class="row">
+            <label for="gradSelect">Gradient</label>
+            <select id="gradSelect"></select>
+          </div>
+          <div class="row two">
+            <div>
+              <label for="gradType">Type</label>
+              <select id="gradType">
+                <option value="linear">Linear</option>
+                <option value="radial">Radial</option>
+                <option value="conic">Conic</option>
+              </select>
+            </div>
+            <div>
+              <label>Angle <output id="gradAngleVal"></output></label>
+              <input type="range" id="gradAngle" min="0" max="345" step="15">
+            </div>
+          </div>
+          <div class="row">
+            <label>Color stops <span class="hint" id="gradStopCount"></span></label>
+            <div id="gradStops" class="stoplist"></div>
+            <div class="btnrow tight">
+              <button id="gradAddStop" class="btn mini">+ Stop</button>
+            </div>
+          </div>
+          <div class="row">
+            <label>Preview</label>
+            <div class="gpreview"><canvas id="gradPreview" height="26"></canvas></div>
+          </div>
+          <div class="btnrow">
+            <button id="gradSave" class="btn">💾 Save as custom</button>
+            <button id="gradDelete" class="btn ghost">🗑 Delete</button>
+          </div>
+          <p class="help">The selected gradient colors the tiling when
+            <i>Color source → Gradient</i>, and the background when
+            <i>Background → Gradient</i> (Gradient Sweep follows its angle).</p>
+        </div>
+      </details>
+
+      <details>
+        <summary>Visual effects</summary>
+        <div class="body">
+          <div class="row">
+            <label>Blur <output id="fxBlurVal"></output></label>
+            <input type="range" id="fxBlur" min="0" max="30" step="0.5">
+          </div>
+          <div class="row">
+            <label>Glow <output id="fxGlowVal"></output></label>
+            <input type="range" id="fxGlow" min="0" max="100" step="1">
+          </div>
+          <div class="row">
+            <label>Glow radius <output id="fxGlowRadiusVal"></output></label>
+            <input type="range" id="fxGlowRadius" min="2" max="60" step="1">
+          </div>
+          <div class="row">
+            <label>Shadow depth <output id="fxShadowVal"></output></label>
+            <input type="range" id="fxShadow" min="0" max="90" step="1">
+          </div>
+          <div class="row two">
+            <div>
+              <label>Softness <output id="fxShadowSoftVal"></output></label>
+              <input type="range" id="fxShadowSoft" min="0" max="60" step="1">
+            </div>
+            <div>
+              <label>Offset <output id="fxShadowOffVal"></output></label>
+              <input type="range" id="fxShadowOff" min="0" max="40" step="1">
+            </div>
+          </div>
+          <div class="row">
+            <label>Film grain <output id="fxGrainVal"></output></label>
+            <input type="range" id="fxGrain" min="0" max="60" step="1">
+          </div>
+          <div class="row two">
+            <div>
+              <label>Vignette <output id="fxVignetteVal"></output></label>
+              <input type="range" id="fxVignette" min="0" max="90" step="1">
+            </div>
+            <div>
+              <label>Mode</label>
+              <select id="fxVignetteMode">
+                <option value="dark">Darken edges</option>
+                <option value="light">Lighten edges</option>
+              </select>
+            </div>
+          </div>
+          <p class="help">Effects apply to the live preview, exported PNGs and
+            recorded WebM videos alike. 0 = off.</p>
         </div>
       </details>
 
@@ -114,6 +280,10 @@
           <div class="row">
             <label for="animSelect">Effect</label>
             <select id="animSelect"></select>
+          </div>
+          <div class="row" id="flowAngleRow">
+            <label>Direction <output id="flowAngleVal"></output></label>
+            <input type="range" id="flowAngle" min="0" max="345" step="15">
           </div>
           <div class="row">
             <label>Speed <output id="animSpeedVal"></output></label>
@@ -152,11 +322,12 @@
         <summary>About</summary>
         <div class="body">
           <p class="help">
-            This studio renders the aperiodic monotile discovered in 2023 by
-            David Smith et al. — the “hat” — using the metatile substitution
-            construction from their paper <i>An Aperiodic Monotile</i>
-            (arXiv:2303.10798). Every wallpaper is a patch of a tiling that
-            never repeats.
+            A studio for the aperiodic <b>Einstein hat</b> monotile (Smith, Myers,
+            Kaplan &amp; Goodman-Strauss 2023 — <i>An Aperiodic Monotile</i>,
+            arXiv:2303.10798) plus a collection of mathematically verified
+            periodic and composite tilings: honeycombs, kagome, octagon–square,
+            Cairo pentagons (dual of the snub square tiling), herringbone,
+            Penrose rhombs (dual of a de Bruijn pentagrid) and more.
           </p>
           <div class="btnrow">
             <button id="fsBtn" class="btn">⛶ Fullscreen</button>
@@ -175,7 +346,11 @@
 
 </div>
 <script src="js/hat-tiling.js"></script>
+<script src="js/tilings.js"></script>
 <script src="js/palettes.js"></script>
+<script src="js/gradients.js"></script>
+<script src="js/custom-palettes.js"></script>
+<script src="js/effects.js"></script>
 <script src="js/render.js"></script>
 <script src="js/app.js"></script>
 </body>

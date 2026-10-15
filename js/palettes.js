@@ -86,9 +86,22 @@
     return rgbToHex(r * 255, g * 255, b * 255);
   }
 
+  let customResolver = null; // set by custom-palettes integration in app.js
+  function getPalette(ref) {
+    // ref: number (legacy builtin index) | {kind:'builtin',index} | {kind:'custom',id}
+    if (ref && typeof ref === 'object' && ref.kind === 'custom' && customResolver) {
+      const p = customResolver(ref.id);
+      if (p) return p;
+    }
+    const i = (ref && typeof ref === 'object') ? (ref.index || 0) : (typeof ref === 'number' ? ref : 0);
+    return PALETTES[((i % PALETTES.length) + PALETTES.length) % PALETTES.length];
+  }
+
   root.Palettes = {
     LIST: PALETTES,
-    get: (i) => PALETTES[((i % PALETTES.length) + PALETTES.length) % PALETTES.length],
+    get: getPalette,
+    setCustomResolver(fn) { customResolver = fn; },
     hexToRgb, rgbToHex, shade, luminance, autoLineColor, hslRotate,
   };
+  if (typeof module !== 'undefined' && module.exports) module.exports = root.Palettes;
 })(typeof window !== 'undefined' ? window : globalThis);

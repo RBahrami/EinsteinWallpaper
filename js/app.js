@@ -1,10 +1,12 @@
 /*
- * app.js — UI wiring for EinsteinWallpaper.
+ * app.js — UI wiring for EinsteinWallpaper (Geometric Wallpaper Studio).
  */
 (function () {
   'use strict';
 
-  const HT = window.HatTiling, R = window.Renderer, PAL = window.Palettes;
+  const HT = window.HatTiling, R = window.Renderer, PAL = window.Palettes,
+    TL = window.Tilings, GR = window.Gradients, CP = window.CustomPalettes,
+    FX = window.Effects;
 
   /* ------------------------------------------------------- presets */
 
@@ -39,49 +41,91 @@
   const ANIMS = [
     ['none', 'None (static)'],
     ['shimmer', 'Shimmer (light wave)'],
-    ['cascade', 'Cascade (tiles appear)'],
-    ['drift', 'Drift (slow pan)'],
-    ['hue', 'Hue cycle'],
-    ['pulse', 'Pulse (breathing)'],
+    ['flow', 'Gradient Flow'],
+    ['glowwave', 'Glow Wave'],
   ];
 
-  const MODES = [
-    ['supertile', 'Supertiles (patches)'],
-    ['orientation', 'By orientation'],
-    ['mirror', 'Mirror split'],
-    ['gradient', 'Gradient sweep'],
-    ['random', 'Random mix'],
-    ['solid', 'Solid color'],
-  ];
+  const MODE_LABELS = {
+    supertile: 'Supertiles (patches)',
+    kind: 'By tile kind',
+    orientation: 'By orientation',
+    mirror: 'Mirror split',
+    gradient: 'Gradient sweep',
+    random: 'Random mix',
+    solid: 'Solid color',
+  };
+
+  const FX_DEFAULTS = {
+    blur: 0, glow: 0, glowRadius: 14,
+    shadow: 0, shadowSoft: 14, shadowOff: 8,
+    grain: 0, vignette: 0, vignetteMode: 'dark',
+  };
 
   const DEFAULTS = {
     aspect: '16:9', orientation: 'landscape',
     resW: 1920, resH: 1080,
-    tileSize: 34, variant: 'H', rotation: 0, panX: 0, panY: 0,
+    family: 'hat', tileSize: 34, variant: 'H', rotation: 0, panX: 0, panY: 0,
     gap: 0.02, outlineWidth: 1.2,
-    colorMode: 'supertile', palette: 0,
+    colorMode: 'supertile',
+    paletteRef: { kind: 'builtin', index: 0 },
+    colorSource: 'palette', gradientId: null, bgSource: 'palette',
     lineAuto: true, lineColor: '#101014',
-    animation: 'shimmer', animSpeed: 1,
+    animation: 'shimmer', animSpeed: 1, flowAngle: 30,
+    effects: { ...FX_DEFAULTS },
     seed: 7,
   };
 
-  let P = Object.assign({}, DEFAULTS);
-  try {
-    const saved = localStorage.getItem('einstein-wallpaper-v1');
-    if (saved) P = Object.assign({}, DEFAULTS, JSON.parse(saved));
-  } catch (e) { /* ignore */ }
+  /* -------------------------------------- settings load + migration */
+
+  let P = loadSettings();
+
+  function loadSettings() {
+    const p = JSON.parse(JSON.stringify(DEFAULTS));
+    try {
+      const saved = localStorage.getItem('einstein-wallpaper-v1');
+      if (saved) {
+        const s = JSON.parse(saved);
+        Object.assign(p, s);
+        // migration: legacy numeric palette -> builtin ref
+        if (typeof s.palette === 'number' && !s.paletteRef) {
+          p.paletteRef = { kind: 'builtin', index: s.palette };
+        }
+        if (!TL.isFamily(p.family)) p.family = 'hat';
+        if (p.family === 'hat' && !['H', 'P', 'F'].includes(p.variant)) p.variant = 'H';
+        p.effects = Object.assign({}, FX_DEFAULTS, s.effects || {});
+        for (const k of Object.keys(FX_DEFAULTS)) {
+          if (typeof p.effects[k] !== typeof FX_DEFAULTS[k]) p.effects[k] = FX_DEFAULTS[k];
+        }
+        if (!ANIMS.some((a) => a[0] === p.animation)) p.animation = 'shimmer';
+      }
+    } catch (e) { /* defensive: malformed storage -> defaults */ }
+    return p;
+  }
 
   function save() {
     try { localStorage.setItem('einstein-wallpaper-v1', JSON.stringify(P)); } catch (e) { /* ignore */ }
   }
 
-  function naturalOrientation(a) { return a.r >= 1 ? 'landscape' : 'portrait'; }
+  // custom palette resolver for Palettes.get
+  PAL.setCustomResolver((id) => CP.find(id));
 
+  function naturalOrientation(a) { return a.r >= 1 ? 'landscape' : 'portrait'; }
   function currentAspect() {
     const a = ASPECTS.find((x) => x.id === P.aspect) || ASPECTS[0];
     const nat = naturalOrientation(a);
     if (P.orientation === nat) return a.r;
     return 1 / a.r;
+  }
+  function currentFamily() { return TL.get(P.family); }
+  function currentGradient() {
+    return GR.find(P.gradientId) || GR.BUILTINS[0];
+  }
+  function sameRef(a, b) {
+    if (a === b) return true;
+    if (!a || !b) return false;
+    if (a.kind === 'builtin' && b.kind === 'builtin') return a.index === b.index;
+    if (a.kind === 'custom' && b.kind === 'custom') return a.id === b.id;
+    return false;
   }
 
   /* ----------------------------------------------------------- dom */
@@ -102,8 +146,7 @@
         P.aspect = a.id;
         P.orientation = naturalOrientation(a);
         applyResForAspect();
-        syncControls(); refresh();
-        save();
+        syncControls(); refresh(); save();
       };
       box.appendChild(b);
     }
@@ -148,34 +191,247 @@
     }
   }
 
+  /* ------------------------------------------- family grid */
+
+  function buildFamilyGrid() {
+    const grid = $('familyGrid');
+    grid.innerHTML = '';
+    for (const fam of TL.FAMILIES) {
+      const b = document.createElement('button');
+      b.className = 'fam' + (P.family === fam.id ? ' on' : '');
+      b.setAttribute('role', 'option');
+      b.setAttribute('aria-selected', P.family === fam.id ? 'true' : 'false');
+      b.title = fam.name;
+      b.innerHTML = fam.icon + `<span>${fam.name}</span>`;
+      b.onclick = () => {
+        if (P.family === fam.id) return;
+        P.family = fam.id;
+        P.variant = fam.defaultVariant;
+        if (!fam.modes.includes(P.colorMode)) {
+          P.colorMode = fam.modes.includes('random') ? 'random' : fam.modes[0];
+        }
+        syncControls(); refresh(); save();
+      };
+      grid.appendChild(b);
+    }
+  }
+
+  /* ------------------------------------------- palette grid */
+
   function buildPaletteGrid() {
     const grid = $('paletteGrid');
     grid.innerHTML = '';
     const nameEl = $('palName');
-    if (nameEl) nameEl.textContent = PAL.LIST[P.palette].name;
-    PAL.LIST.forEach((pal, i) => {
-      const b = document.createElement('button');
-      b.className = 'swatch' + (P.palette === i ? ' on' : '');
-      b.title = pal.name;
-      b.style.background = `linear-gradient(135deg, ${pal.colors.join(',')})`;
-      b.style.borderColor = P.palette === i ? '#fff' : 'rgba(255,255,255,.15)';
-      b.onclick = () => { P.palette = i; buildPaletteGrid(); refresh(); save(); };
-      grid.appendChild(b);
+    const pal = PAL.get(P.paletteRef);
+    if (nameEl) nameEl.textContent = pal.name;
+    PAL.LIST.forEach((palB, i) => {
+      grid.appendChild(makeSwatch(palB, { kind: 'builtin', index: i }));
     });
+    const customs = CP.list();
+    if (customs.length) {
+      const sep = document.createElement('div');
+      sep.className = 'swatch-sep';
+      sep.title = 'Custom palettes';
+      grid.appendChild(sep);
+      for (const p of customs) grid.appendChild(makeSwatch(p, { kind: 'custom', id: p.id }));
+    }
+  }
+  function makeSwatch(pal, ref) {
+    const b = document.createElement('button');
+    const on = sameRef(P.paletteRef, ref);
+    b.className = 'swatch' + (on ? ' on' : '');
+    b.title = pal.name + (ref.kind === 'custom' ? ' (custom)' : '');
+    b.style.background = `linear-gradient(135deg, ${pal.colors.join(',')})`;
+    b.style.borderColor = on ? '#fff' : 'rgba(255,255,255,.15)';
+    b.onclick = () => { P.paletteRef = ref; buildPaletteGrid(); syncPalEditorSelect(); refresh(); save(); };
+    return b;
   }
 
-  function setSlider(id, valId, v, fmt) {
-    $(id).value = v;
-    $(valId).textContent = fmt(v);
+  /* --------------------------------------------- palette editor */
+
+  let palEditRef = { kind: 'builtin', index: 0 };
+  let palEditDraft = null; // working copy {name, colors, bg, outline}
+
+  function palEditSource() {
+    if (palEditRef.kind === 'custom') return CP.find(palEditRef.id);
+    return PAL.LIST[palEditRef.index] || PAL.LIST[0];
+  }
+  function syncPalEditorSelect() {
+    const sel = $('palEditSelect');
+    sel.innerHTML = '';
+    const g1 = document.createElement('optgroup');
+    g1.label = 'Built-in';
+    PAL.LIST.forEach((p, i) => {
+      const o = document.createElement('option');
+      o.value = 'bi:' + i; o.textContent = p.name;
+      if (palEditRef.kind === 'builtin' && palEditRef.index === i) o.selected = true;
+      g1.appendChild(o);
+    });
+    sel.appendChild(g1);
+    const customs = CP.list();
+    if (customs.length) {
+      const g2 = document.createElement('optgroup');
+      g2.label = 'Custom';
+      for (const p of customs) {
+        const o = document.createElement('option');
+        o.value = 'cu:' + p.id; o.textContent = p.name;
+        if (palEditRef.kind === 'custom' && palEditRef.id === p.id) o.selected = true;
+        g2.appendChild(o);
+      }
+      sel.appendChild(g2);
+    }
+  }
+  function loadPalDraft() {
+    const src = palEditSource();
+    palEditDraft = {
+      name: src.name,
+      colors: [...src.colors],
+      bg: src.bg || '#0b1020',
+      outline: ('outline' in src && src.outline != null) ? src.outline : null,
+    };
+  }
+  function renderPalEditor() {
+    const src = palEditSource();
+    $('palEditName').value = palEditDraft.name;
+    $('palEditBg').value = palEditDraft.bg;
+    $('palEditOutline').value = palEditDraft.outline || PAL.autoLineColor(palEditDraft.bg);
+    $('palEditOutline').disabled = palEditDraft.outline == null;
+    $('palEditCount').textContent = palEditDraft.colors.length + ' colors';
+    const list = $('palEditColors');
+    list.innerHTML = '';
+    palEditDraft.colors.forEach((c, i) => {
+      const row = document.createElement('div');
+      row.className = 'stoprow';
+      const col = document.createElement('input');
+      col.type = 'color'; col.value = c;
+      col.oninput = () => { palEditDraft.colors[i] = col.value; renderPalPreview(); };
+      const hex = document.createElement('input');
+      hex.type = 'text'; hex.value = c; hex.className = 'hextext'; hex.spellcheck = false;
+      hex.onchange = () => {
+        if (GR.isHexColor(hex.value)) { palEditDraft.colors[i] = GR.normHex(hex.value); renderPalEditor(); }
+        else hex.value = palEditDraft.colors[i];
+      };
+      const up = document.createElement('button');
+      up.className = 'mini-btn'; up.textContent = '↑'; up.title = 'Move up';
+      up.onclick = () => { if (i > 0) { [palEditDraft.colors[i - 1], palEditDraft.colors[i]] = [palEditDraft.colors[i], palEditDraft.colors[i - 1]]; renderPalEditor(); } };
+      const down = document.createElement('button');
+      down.className = 'mini-btn'; down.textContent = '↓'; down.title = 'Move down';
+      down.onclick = () => { if (i < palEditDraft.colors.length - 1) { [palEditDraft.colors[i + 1], palEditDraft.colors[i]] = [palEditDraft.colors[i], palEditDraft.colors[i + 1]]; renderPalEditor(); } };
+      const del = document.createElement('button');
+      del.className = 'mini-btn'; del.textContent = '×'; del.title = 'Remove color';
+      del.onclick = () => { if (palEditDraft.colors.length > 1) { palEditDraft.colors.splice(i, 1); renderPalEditor(); } };
+      row.append(col, hex, up, down, del);
+      list.appendChild(row);
+    });
+    $('palDelete').disabled = palEditRef.kind !== 'custom';
+    renderPalPreview();
+  }
+  function renderPalPreview() {
+    const el = $('palEditPreview');
+    el.style.background = `linear-gradient(90deg, ${palEditDraft.colors.join(',')})`;
+    el.style.borderBottom = `4px solid ${palEditDraft.outline || PAL.autoLineColor(palEditDraft.bg)}`;
+    el.style.backgroundBlendMode = 'normal';
+    el.style.boxShadow = `inset 0 -100px 0 -98px ${palEditDraft.bg}`;
+  }
+  function syncPalEditorAll() {
+    syncPalEditorSelect();
+    loadPalDraft();
+    renderPalEditor();
+  }
+
+  /* --------------------------------------------- gradient editor */
+
+  let gradEditId = null;   // selected gradient id (builtin or custom)
+  let gradDraft = null;    // working normalized copy
+
+  function syncGradSelect() {
+    const sel = $('gradSelect');
+    sel.innerHTML = '';
+    const g1 = document.createElement('optgroup');
+    g1.label = 'Built-in';
+    GR.BUILTINS.forEach((g) => {
+      const o = document.createElement('option');
+      o.value = g.id; o.textContent = g.name;
+      if (gradEditId === g.id) o.selected = true;
+      g1.appendChild(o);
+    });
+    sel.appendChild(g1);
+    const customs = GR.list();
+    if (customs.length) {
+      const g2 = document.createElement('optgroup');
+      g2.label = 'Custom';
+      for (const g of customs) {
+        const o = document.createElement('option');
+        o.value = g.id; o.textContent = g.name;
+        if (gradEditId === g.id) o.selected = true;
+        g2.appendChild(o);
+      }
+      sel.appendChild(g2);
+    }
+  }
+  function loadGradDraft() {
+    const src = GR.find(gradEditId) || GR.BUILTINS[0];
+    gradDraft = GR.normalize(JSON.parse(JSON.stringify(src)));
+    gradEditId = src.id;
+  }
+  function renderGradEditor() {
+    fillSelect($('gradType'), [['linear', 'Linear'], ['radial', 'Radial'], ['conic', 'Conic']], gradDraft.type);
+    $('gradAngle').value = gradDraft.angle;
+    $('gradAngleVal').textContent = gradDraft.angle + '°';
+    $('gradStopCount').textContent = gradDraft.stops.length + ' stops';
+    const list = $('gradStops');
+    list.innerHTML = '';
+    gradDraft.stops.forEach((s, i) => {
+      const row = document.createElement('div');
+      row.className = 'stoprow';
+      const col = document.createElement('input');
+      col.type = 'color'; col.value = s.color;
+      col.oninput = () => { gradDraft.stops[i].color = col.value; renderGradPreview(); };
+      const pos = document.createElement('input');
+      pos.type = 'number'; pos.min = 0; pos.max = 100; pos.step = 1;
+      pos.value = Math.round(s.pos * 100);
+      pos.className = 'postext';
+      pos.onchange = () => {
+        gradDraft.stops[i].pos = Math.max(0, Math.min(100, +pos.value || 0)) / 100;
+        gradDraft.stops.sort((a, b) => a.pos - b.pos);
+        renderGradEditor();
+      };
+      const del = document.createElement('button');
+      del.className = 'mini-btn'; del.textContent = '×'; del.title = 'Remove stop';
+      del.onclick = () => {
+        if (gradDraft.stops.length > 2) { gradDraft.stops.splice(i, 1); renderGradEditor(); }
+      };
+      row.append(col, pos, del);
+      list.appendChild(row);
+    });
+    $('gradDelete').disabled = !gradEditId || GR.BUILTINS.some((g) => g.id === gradEditId);
+    renderGradPreview();
+  }
+  function renderGradPreview() {
+    const cv = $('gradPreview');
+    const w = cv.parentElement ? (cv.parentElement.clientWidth || 260) : 260;
+    cv.width = w; cv.height = 26;
+    const ctx = cv.getContext('2d');
+    ctx.clearRect(0, 0, cv.width, cv.height);
+    const g = GR.toCanvas(ctx, gradDraft, cv.width, cv.height, 0);
+    if (g && g.conic) GR.fillConic(ctx, gradDraft, cv.width, cv.height);
+    else { ctx.fillStyle = g; ctx.fillRect(0, 0, cv.width, cv.height); }
+  }
+  function syncGradEditorAll() {
+    syncGradSelect();
+    loadGradDraft();
+    renderGradEditor();
   }
 
   /* --------------------------------------------------- rendering */
 
+  const sceneCanvas = document.createElement('canvas');
+  const sceneCtx = sceneCanvas.getContext('2d');
+
   let scene = null, look = null, animator = null;
-  let renderPending = false, animRaf = 0, recording = false;
+  let animRaf = 0, recording = false;
 
   function previewSize() {
-    // fit current aspect into the preview viewport, capped resolution
     const box = $('canvasWrap').getBoundingClientRect();
     const ar = currentAspect();
     let w = box.width - 24, h = box.height - 24;
@@ -188,75 +444,89 @@
   }
 
   function makeLook() {
-    const pal = PAL.get(P.palette);
-    const lut = R.buildLut(P.palette);
-    const line = P.lineAuto ? PAL.autoLineColor(pal.bg) : P.lineColor;
-    return { lut, line, bg: pal.bg, gap: P.gap, outlineWidth: P.outlineWidth };
+    const pal = PAL.get(P.paletteRef);
+    let lut;
+    if (P.colorSource === 'gradient') {
+      lut = R.buildLut({ _isGradient: true, gradient: GR.normalize(currentGradient()) });
+    } else {
+      lut = R.buildLut(P.paletteRef);
+    }
+    let line;
+    if (P.lineAuto) {
+      const bgRef = P.bgSource === 'gradient' ? GR.sample(GR.normalize(currentGradient()), 0.5) : pal.bg;
+      line = PAL.autoLineColor(bgRef);
+    } else {
+      line = P.lineColor;
+    }
+    const look = { lut, line, bg: pal.bg, gap: P.gap, outlineWidth: P.outlineWidth };
+    if (P.bgSource === 'gradient') {
+      const grad = GR.normalize(currentGradient());
+      look.bgPaint = (ctx, W, H) => {
+        const g = GR.toCanvas(ctx, grad, W, H, 0);
+        if (g && g.conic) GR.fillConic(ctx, grad, W, H);
+        else { ctx.fillStyle = g; ctx.fillRect(0, 0, W, H); }
+      };
+    }
+    return look;
   }
 
-  function regenerate(fitOnly) {
+  function fxParams() {
+    return { ...P.effects };
+  }
+
+  function regenerate() {
     const ps = previewSize();
     canvas.width = ps.w; canvas.height = ps.h;
     canvas.style.width = ps.cssW + 'px';
     canvas.style.height = ps.cssH + 'px';
+    sceneCanvas.width = ps.w; sceneCanvas.height = ps.h;
 
     const t0 = performance.now();
-    // preview scale: same visual scale as the target resolution
     const scaleToTarget = ps.w / P.resW;
     const p = Object.assign({}, P, { tileSize: P.tileSize * scaleToTarget });
-    const budget = p.animation === 'none' ? 450000 : 120000;
+    const budget = (P.animation === 'none' ? 450000 : 120000);
     scene = R.buildScene(p, ps.w, ps.h, { budget });
     if (!scene) { statusEl.textContent = 'failed to build tiling'; return; }
     R.colorize(scene, p);
     look = makeLook();
     animator = R.makeAnimator(scene, p, look);
     const ms = (performance.now() - t0).toFixed(0);
-    statusEl.textContent =
-      `level ${scene.level} · ${scene.hats.length.toLocaleString()} tiles · ${ms} ms` +
-      (scene.degraded ? ' · (best effort fit)' : '');
 
-    if (animator.drift) prepareDrift();
-    renderFrame(0);
-  }
-
-  let driftCanvas = null, driftMeta = null;
-  function prepareDrift() {
-    // render an oversized static pattern for drifting
-    const ps = previewSize();
-    const m = 0.18;
-    const p = Object.assign({}, P, { tileSize: P.tileSize * (ps.w / P.resW) });
-    const sc = R.buildScene(p, Math.round(ps.w * (1 + 2 * m)), Math.round(ps.h * (1 + 2 * m)), { budget: 200000 });
-    if (!sc) return;
-    R.colorize(sc, p);
-    const lk = makeLook();
-    driftCanvas = document.createElement('canvas');
-    driftCanvas.width = sc.W; driftCanvas.height = sc.H;
-    R.drawScene(driftCanvas.getContext('2d'), sc, p, lk);
-    driftMeta = { m, w: ps.w, h: ps.h };
-  }
-
-  function renderFrame(t) {
-    if (!scene) return;
-    const ctx = canvas.getContext('2d');
-    if (P.animation === 'drift' && driftCanvas) {
-      const { m, w, h } = driftMeta;
-      const amp = m * 0.5;
-      const dx = Math.sin(t * 0.00021 * P.animSpeed) * w * amp * 2;
-      const dy = Math.cos(t * 0.00016 * P.animSpeed) * h * amp * 2;
-      ctx.fillStyle = look.bg;
-      ctx.fillRect(0, 0, w, h);
-      ctx.drawImage(driftCanvas, -dx - (driftCanvas.width - w) / 2 + w * m, -dy - (driftCanvas.height - h) / 2 + h * m);
-    } else if (animator && animator.frame) {
-      animator.frame(ctx, t);
+    let status = '';
+    if (scene.kind === 'hat') {
+      status = `level ${scene.level} · ${scene.hats.length.toLocaleString()} tiles · ${ms} ms` + (scene.degraded ? ' · (best effort fit)' : '');
     } else {
-      R.drawScene(ctx, scene, P, look);
+      status = `${scene.tiles.length.toLocaleString()} tiles · ${ms} ms`;
+      if (scene.coarse > 1.01) status += ` · scale ×${scene.coarse.toFixed(1)} (budget)`;
     }
+    statusEl.textContent = status;
+
+    // paint the static scene once (transparent bg; background comes from Effects)
+    R.paintScene(sceneCtx, scene, p, look);
+    composeFrame(0);
+    if (P.animation !== 'none' && !(animator && animator.overlay)) {
+      // per-tile animations loop below; overlay ones loop too
+    }
+    if (P.animation !== 'none') {
+      cancelAnimationFrame(animRaf);
+      animRaf = requestAnimationFrame(loop);
+    }
+  }
+
+  function composeFrame(t) {
+    const ctx = canvas.getContext('2d');
+    FX.compose(ctx, sceneCanvas, scene.W, scene.H, look, fxParams(),
+      animator && animator.overlayFn ? (c) => animator.overlayFn(c, t) : null);
   }
 
   function loop(t) {
     animRaf = requestAnimationFrame(loop);
     if (P.animation === 'none') return;
-    renderFrame(t);
+    if (animator && animator.perTile) {
+      sceneCtx.clearRect(0, 0, scene.W, scene.H);
+      animator.frame(sceneCtx, t);
+    }
+    composeFrame(t);
   }
 
   let refreshTimer = 0;
@@ -265,7 +535,6 @@
     refreshTimer = setTimeout(() => {
       cancelAnimationFrame(animRaf);
       regenerate();
-      if (P.animation !== 'none') animRaf = requestAnimationFrame(loop);
     }, 120);
   }
 
@@ -277,19 +546,25 @@
     const t0 = performance.now();
     const off = document.createElement('canvas');
     off.width = P.resW; off.height = P.resH;
+    const offScene = document.createElement('canvas');
+    offScene.width = P.resW; offScene.height = P.resH;
     const p = Object.assign({}, P, { animation: 'none' });
     const sc = R.buildScene(p, P.resW, P.resH, { budget: 500000 });
     if (!sc) { statusEl.textContent = 'export failed'; return; }
     R.colorize(sc, p);
     const lk = makeLook();
-    R.drawScene(off.getContext('2d'), sc, p, lk);
+    const sctx = offScene.getContext('2d');
+    R.paintScene(sctx, sc, p, lk);
+    FX.compose(off.getContext('2d'), offScene, P.resW, P.resH, lk, fxParams());
+    const famTag = P.family === 'hat' ? 'einstein' : P.family;
     off.toBlob((blob) => {
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = `einstein-${P.resW}x${P.resH}-${PAL.LIST[P.palette].name.toLowerCase().replace(/[^a-z]+/g, '-')}.png`;
+      a.download = `${famTag}-${P.resW}x${P.resH}.png`;
       a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-      statusEl.textContent = `PNG saved · ${sc.hats.length.toLocaleString()} tiles · ${(performance.now() - t0).toFixed(0)} ms`;
+      const n = sc.kind === 'hat' ? sc.hats.length : sc.tiles.length;
+      statusEl.textContent = `PNG saved · ${n.toLocaleString()} tiles · ${(performance.now() - t0).toFixed(0)} ms`;
     }, 'image/png');
   }
 
@@ -309,14 +584,19 @@
       const blob = new Blob(chunks, { type: 'video/webm' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = `einstein-live-${P.animation}-${seconds}s.webm`;
+      a.download = `wallpaper-live-${P.animation}-${seconds}s.webm`;
       a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 5000);
       btn.textContent = orig; recording = false;
       statusEl.textContent = `WebM saved (${(blob.size / 1048576).toFixed(1)} MB)`;
     };
     btn.textContent = `● recording ${seconds}s…`;
-    if (P.animation === 'none') { P.animation = 'shimmer'; fillSelect($('animSelect'), ANIMS, P.animation); }
+    if (P.animation === 'none') {
+      P.animation = 'shimmer';
+      fillSelect($('animSelect'), ANIMS, P.animation);
+      syncAnimVisibility();
+      refresh();
+    }
     rec.start();
     let elapsed = 0;
     const iv = setInterval(() => {
@@ -328,16 +608,32 @@
 
   function randomize() {
     const rr = Math.random;
-    P.palette = Math.floor(rr() * PAL.LIST.length);
-    const modes = MODES.map((m) => m[0]);
-    P.colorMode = modes[Math.floor(rr() * modes.length)];
-    const anims = ['none', 'shimmer', 'cascade', 'drift', 'hue', 'pulse'];
-    P.animation = anims[Math.floor(rr() * anims.length)];
-    P.variant = ['H', 'P', 'F'][Math.floor(rr() * 3)];
+    // family: keep hat prominent
+    P.family = rr() < 0.35 ? 'hat' : TL.FAMILIES[1 + Math.floor(rr() * (TL.FAMILIES.length - 1))].id;
+    const fam = currentFamily();
+    P.variant = fam.variants[Math.floor(rr() * fam.variants.length)].id;
+    P.colorMode = fam.modes[Math.floor(rr() * fam.modes.length)];
+    const nB = PAL.LIST.length, nC = CP.count();
+    P.paletteRef = (nC && rr() < 0.25)
+      ? { kind: 'custom', id: CP.list()[Math.floor(rr() * nC)].id }
+      : { kind: 'builtin', index: Math.floor(rr() * nB) };
+    P.colorSource = rr() < 0.2 ? 'gradient' : 'palette';
+    if (P.colorSource === 'gradient') {
+      const all = GR.all();
+      P.gradientId = all[Math.floor(rr() * all.length)].id;
+    }
+    P.bgSource = rr() < 0.15 ? 'gradient' : 'palette';
+    P.animation = ['none', 'shimmer', 'flow', 'glowwave'][Math.floor(rr() * 4)];
+    P.flowAngle = Math.floor(rr() * 24) * 15;
     P.rotation = Math.floor(rr() * 24) * 15;
     P.tileSize = Math.round(16 + rr() * 60);
-    P.gap = rr() < 0.5 ? 0 : +(rr() * 0.05).toFixed(3);
+    P.gap = rr() < 0.6 ? 0 : +(rr() * 0.05).toFixed(3);
     P.seed = Math.floor(rr() * 99999);
+    P.effects = { ...FX_DEFAULTS };
+    if (rr() < 0.4) {
+      const pick = ['glow', 'vignette', 'grain', 'shadow'][Math.floor(rr() * 4)];
+      P.effects[pick] = pick === 'glow' ? 20 + rr() * 25 : pick === 'grain' ? 8 + rr() * 12 : 25 + rr() * 25;
+    }
     syncControls();
     refresh();
     save();
@@ -351,26 +647,64 @@
 
   /* ------------------------------------------------- control sync */
 
+  function syncAnimVisibility() {
+    const showAngle = P.animation === 'flow' || P.animation === 'glowwave';
+    $('flowAngleRow').style.display = showAngle ? '' : 'none';
+  }
+  function syncFamilyVisibility() {
+    const isLine = P.family === 'lines';
+    $('gapRow').style.display = isLine ? 'none' : '';
+    $('outlineRow').style.display = isLine ? 'none' : '';
+  }
+
+  function setSlider(id, valId, v, fmt) {
+    $(id).value = v;
+    $(valId).textContent = fmt(v);
+  }
+
   function syncControls() {
     buildAspectChips();
     buildResSelect();
+    buildFamilyGrid();
     buildPaletteGrid();
-    fillSelect($('modeSelect'), MODES, P.colorMode);
+    const fam = currentFamily();
+    fillSelect($('variantSelect'), fam.variants.map((v) => [v.id, v.name]), P.variant);
+    fillSelect($('modeSelect'), fam.modes.map((m) => [m, MODE_LABELS[m] || m]), P.colorMode);
     fillSelect($('animSelect'), ANIMS, P.animation);
-    fillSelect($('variantSelect'), [['H', 'Variant A'], ['P', 'Variant B'], ['F', 'Variant C']], P.variant);
+    fillSelect($('colorSource'), [['palette', 'Palette'], ['gradient', 'Gradient']], P.colorSource);
+    fillSelect($('bgSource'), [['palette', 'Solid (palette)'], ['gradient', 'Gradient']], P.bgSource);
     setSlider('tileSize', 'tileSizeVal', P.tileSize, (v) => v + ' px');
     setSlider('rotation', 'rotationVal', P.rotation, (v) => v + '°');
     setSlider('gap', 'gapVal', Math.round(P.gap * 100), (v) => v + '%');
     setSlider('outlineWidth', 'outlineWidthVal', P.outlineWidth, (v) => (+v).toFixed(1) + ' px');
     setSlider('animSpeed', 'animSpeedVal', P.animSpeed, (v) => (+v).toFixed(1) + '×');
+    setSlider('flowAngle', 'flowAngleVal', P.flowAngle, (v) => v + '°');
     setSlider('seed', 'seedVal', P.seed, (v) => '#' + v);
+    const fx = P.effects;
+    setSlider('fxBlur', 'fxBlurVal', fx.blur, (v) => (+v) + ' px');
+    setSlider('fxGlow', 'fxGlowVal', fx.glow, (v) => Math.round(v) + '%');
+    setSlider('fxGlowRadius', 'fxGlowRadiusVal', fx.glowRadius, (v) => v + ' px');
+    setSlider('fxShadow', 'fxShadowVal', fx.shadow, (v) => Math.round(v) + '%');
+    setSlider('fxShadowSoft', 'fxShadowSoftVal', fx.shadowSoft, (v) => v + ' px');
+    setSlider('fxShadowOff', 'fxShadowOffVal', fx.shadowOff, (v) => v + ' px');
+    setSlider('fxGrain', 'fxGrainVal', fx.grain, (v) => Math.round(v) + '%');
+    setSlider('fxVignette', 'fxVignetteVal', fx.vignette, (v) => Math.round(v) + '%');
+    $('fxVignetteMode').value = fx.vignetteMode;
     $('resW').value = P.resW; $('resH').value = P.resH;
     $('lineAuto').checked = P.lineAuto;
     $('lineColor').value = P.lineColor;
     $('lineColor').disabled = P.lineAuto;
+    $('colorSource').value = P.colorSource;
+    $('bgSource').value = P.bgSource;
     const orBtns = document.querySelectorAll('[data-orient]');
     orBtns.forEach((b) => b.classList.toggle('on', b.dataset.orient === P.orientation));
+    syncAnimVisibility();
+    syncFamilyVisibility();
+    syncPalEditorAll();
+    syncGradEditorAll();
   }
+
+  /* ------------------------------------------------------- bind */
 
   function bind() {
     $('resSelect').onchange = (e) => {
@@ -390,7 +724,6 @@
     document.querySelectorAll('[data-orient]').forEach((b) => {
       b.onclick = () => {
         P.orientation = b.dataset.orient;
-        // swap resolution if it matches a preset of the other orientation
         applyResForAspect();
         syncControls(); refresh(); save();
       };
@@ -400,22 +733,165 @@
     $('gap').oninput = (e) => { P.gap = e.target.value / 100; $('gapVal').textContent = e.target.value + '%'; refresh(); save(); };
     $('outlineWidth').oninput = (e) => { P.outlineWidth = +e.target.value; $('outlineWidthVal').textContent = (+e.target.value).toFixed(1) + ' px'; refresh(); save(); };
     $('animSpeed').oninput = (e) => { P.animSpeed = +e.target.value; $('animSpeedVal').textContent = (+e.target.value).toFixed(1) + '×'; save(); };
+    $('flowAngle').oninput = (e) => { P.flowAngle = +e.target.value; $('flowAngleVal').textContent = P.flowAngle + '°'; save(); };
     $('seed').oninput = (e) => { P.seed = +e.target.value || 1; $('seedVal').textContent = '#' + P.seed; refresh(); save(); };
     $('modeSelect').onchange = (e) => { P.colorMode = e.target.value; refresh(); save(); };
-    $('animSelect').onchange = (e) => { P.animation = e.target.value; refresh(); save(); };
+    $('animSelect').onchange = (e) => { P.animation = e.target.value; syncAnimVisibility(); refresh(); save(); };
     $('variantSelect').onchange = (e) => { P.variant = e.target.value; refresh(); save(); };
+    $('colorSource').onchange = (e) => { P.colorSource = e.target.value; refresh(); save(); };
+    $('bgSource').onchange = (e) => { P.bgSource = e.target.value; refresh(); save(); };
     $('lineAuto').onchange = (e) => { P.lineAuto = e.target.checked; $('lineColor').disabled = P.lineAuto; refresh(); save(); };
     $('lineColor').oninput = (e) => { P.lineColor = e.target.value; refresh(); save(); };
+
+    // effects
+    const fxBind = (id, key, valId, fmt, immediate) => {
+      $(id).oninput = (e) => {
+        P.effects[key] = +e.target.value;
+        $(valId).textContent = fmt(+e.target.value);
+        if (immediate) composeFrame(performance.now());
+        save();
+      };
+    };
+    fxBind('fxBlur', 'blur', 'fxBlurVal', (v) => v + ' px');
+    fxBind('fxGlow', 'glow', 'fxGlowVal', (v) => Math.round(v) + '%');
+    fxBind('fxGlowRadius', 'glowRadius', 'fxGlowRadiusVal', (v) => v + ' px');
+    fxBind('fxShadow', 'shadow', 'fxShadowVal', (v) => Math.round(v) + '%');
+    fxBind('fxShadowSoft', 'shadowSoft', 'fxShadowSoftVal', (v) => v + ' px');
+    fxBind('fxShadowOff', 'shadowOff', 'fxShadowOffVal', (v) => v + ' px');
+    fxBind('fxGrain', 'grain', 'fxGrainVal', (v) => Math.round(v) + '%');
+    fxBind('fxVignette', 'vignette', 'fxVignetteVal', (v) => Math.round(v) + '%');
+    $('fxVignetteMode').onchange = (e) => { P.effects.vignetteMode = e.target.value; refresh(); save(); };
+
+    // palette editor
+    $('palEditSelect').onchange = (e) => {
+      const v = e.target.value;
+      palEditRef = v.startsWith('bi:') ? { kind: 'builtin', index: +v.slice(3) } : { kind: 'custom', id: v.slice(3) };
+      loadPalDraft();
+      renderPalEditor();
+    };
+    $('palEditName').oninput = (e) => { palEditDraft.name = e.target.value; };
+    $('palAddColor').onclick = () => {
+      if (palEditDraft.colors.length < CP.MAX_COLORS) {
+        palEditDraft.colors.push('#88aacc');
+        renderPalEditor();
+      }
+    };
+    $('palEditBg').oninput = (e) => { palEditDraft.bg = e.target.value; renderPalPreview(); };
+    $('palEditOutline').oninput = (e) => { palEditDraft.outline = e.target.value; renderPalPreview(); };
+    $('palEditOutlineAuto').onclick = () => {
+      palEditDraft.outline = null;
+      renderPalEditor();
+    };
+    $('palSave').onclick = () => {
+      if (palEditRef.kind === 'custom') {
+        CP.update(palEditRef.id, palEditDraft);
+      } else {
+        const created = CP.create({ ...palEditDraft, name: palEditDraft.name + ' (custom)' });
+        if (created) { palEditRef = { kind: 'custom', id: created.id }; P.paletteRef = { kind: 'custom', id: created.id }; }
+      }
+      save(); syncControls(); refresh();
+      statusEl.textContent = 'palette saved';
+    };
+    $('palDuplicate').onclick = () => {
+      const src = palEditRef.kind === 'custom' ? palEditRef.id : null;
+      const created = src ? CP.duplicate(src) : CP.create(palEditDraft);
+      if (created) { palEditRef = { kind: 'custom', id: created.id }; syncPalEditorAll(); }
+      statusEl.textContent = 'palette duplicated';
+    };
+    $('palNew').onclick = () => {
+      const pal = PAL.get(P.paletteRef);
+      const created = CP.create({
+        name: 'New palette',
+        colors: [...pal.colors],
+        bg: pal.bg,
+        outline: pal.outline != null ? pal.outline : null,
+      });
+      if (created) { palEditRef = { kind: 'custom', id: created.id }; syncPalEditorAll(); }
+      statusEl.textContent = 'new palette created';
+    };
+    $('palDelete').onclick = () => {
+      if (palEditRef.kind !== 'custom') return;
+      CP.remove(palEditRef.id);
+      palEditRef = { kind: 'builtin', index: 0 };
+      if (P.paletteRef.kind === 'custom' && !CP.find(P.paletteRef.id)) {
+        P.paletteRef = { kind: 'builtin', index: 0 };
+      }
+      syncControls(); refresh(); save();
+      statusEl.textContent = 'palette deleted';
+    };
+
+    // theme import/export
+    $('themeExport').onclick = () => {
+      const json = CP.exportJSON();
+      const blob = new Blob([json], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'einstein-wallpaper-themes.json';
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+      statusEl.textContent = 'themes exported';
+    };
+    $('themeImport').onclick = () => $('themeFile').click();
+    $('themeFile').onchange = (e) => {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const res = CP.importJSON(String(reader.result));
+          syncControls(); refresh(); save();
+          statusEl.textContent = `imported ${res.palettes} palettes, ${res.gradients} gradients`;
+        } catch (err) {
+          statusEl.textContent = 'import failed: ' + err.message;
+        }
+      };
+      reader.readAsText(file);
+      e.target.value = '';
+    };
+
+    // gradient editor
+    $('gradSelect').onchange = (e) => {
+      gradEditId = e.target.value;
+      P.gradientId = gradEditId;
+      loadGradDraft();
+      renderGradEditor();
+      refresh(); save();
+    };
+    $('gradType').onchange = (e) => { gradDraft.type = e.target.value; renderGradPreview(); };
+    $('gradAngle').oninput = (e) => { gradDraft.angle = +e.target.value; $('gradAngleVal').textContent = gradDraft.angle + '°'; renderGradPreview(); };
+    $('gradAddStop').onclick = () => {
+      if (gradDraft.stops.length < 16) {
+        gradDraft.stops.push({ pos: 1, color: '#88aacc' });
+        gradDraft.stops.sort((a, b) => a.pos - b.pos);
+        renderGradEditor();
+      }
+    };
+    $('gradSave').onclick = () => {
+      const saved = GR.save(JSON.parse(JSON.stringify(gradDraft)));
+      gradEditId = saved.id;
+      P.gradientId = saved.id;
+      save(); syncGradEditorAll(); refresh();
+      statusEl.textContent = 'gradient saved';
+    };
+    $('gradDelete').onclick = () => {
+      if (!gradEditId || GR.BUILTINS.some((g) => g.id === gradEditId)) return;
+      GR.remove(gradEditId);
+      if (P.gradientId === gradEditId) P.gradientId = null;
+      gradEditId = null;
+      syncGradEditorAll(); refresh(); save();
+      statusEl.textContent = 'gradient deleted';
+    };
+
     $('randomBtn').onclick = randomize;
     $('pngBtn').onclick = exportPNG;
     $('recordBtn').onclick = () => recordWebM(+$('recDuration').value || 10);
     $('fsBtn').onclick = fullscreen;
     $('resetBtn').onclick = () => {
-      P = Object.assign({}, DEFAULTS);
+      P = JSON.parse(JSON.stringify(DEFAULTS));
       save(); syncControls(); refresh();
     };
     document.addEventListener('keydown', (e) => {
-      if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
       if (e.key === 'r') randomize();
       if (e.key === 'f') fullscreen();
     });
@@ -424,7 +900,9 @@
   }
 
   bind();
+  // default gradient selection
+  if (!P.gradientId || !GR.find(P.gradientId)) P.gradientId = GR.BUILTINS[0].id;
+  gradEditId = P.gradientId;
   syncControls();
   regenerate();
-  if (P.animation !== 'none') animRaf = requestAnimationFrame(loop);
 })();
