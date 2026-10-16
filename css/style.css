@@ -57,7 +57,6 @@ body {
   margin: 0 0 8px;
 }
 #projectBar .prow:last-of-type { margin-bottom: 0; }
-#projectBar .prow.btns .btn { flex: 1; padding: 6px 4px; }
 #projName {
   flex: 1; min-width: 0; padding: 7px 9px;
   background: var(--bg2); color: var(--text);
@@ -71,7 +70,8 @@ body {
 }
 #saveState.ok { color: #6be3a2; }
 #saveState.warn { color: #ffe14d; }
-#projectBar .help { font-size: 10.5px; padding: 7px 9px; margin-top: 9px; line-height: 1.5; }
+#projectBar .prow.btns { margin-top: 8px; }
+#projectBar .prow.btns .btn { flex: 1; padding: 6px 4px; }
 
 /* dice buttons: section-scoped randomizers, live in the summary row */
 .dice {
@@ -172,12 +172,37 @@ label.check input { accent-color: var(--accent); }
 .btnrow { display: flex; gap: 8px; margin: 10px 0; }
 .btnrow .btn { flex: 1; }
 
-.help {
-  color: var(--dim); font-size: 11.5px; line-height: 1.55;
-  background: var(--bg2); border: 1px solid var(--line);
-  border-radius: 8px; padding: 9px 11px; margin: 8px 0 0;
+/* ---------------- hover info tips ----------------
+   Small (i) icons in section headers; the rich text lives in a hidden
+   .tipcontent child and is cloned into one shared fixed-position bubble
+   (js/infotips.js) so it can never be clipped by scroll containers. */
+.infotip {
+  flex: none;
+  width: 15px; height: 15px; margin-left: 6px;
+  border: 1px solid #39415a; border-radius: 50%;
+  color: var(--dim); background: transparent;
+  font: italic 700 10px/13px Georgia, "Times New Roman", serif;
+  text-align: center; cursor: help; user-select: none;
+  transition: border-color .12s, color .12s, background .12s;
 }
-.help b { color: var(--text); }
+.infotip::before { content: "i"; }
+.infotip.push { margin-left: auto; }
+.infotip:hover, .infotip:focus-visible, .infotip.open {
+  border-color: var(--accent); color: var(--accent); background: var(--bg2);
+}
+.infotip:focus { outline: none; }
+.infotip .tipcontent { display: none; }
+.tipbubble {
+  position: fixed; z-index: 1000;
+  width: max-content; max-width: 300px;
+  padding: 9px 12px; border-radius: 9px;
+  background: var(--bg2); border: 1px solid #3a4152;
+  box-shadow: 0 12px 36px rgba(0,0,0,.55);
+  color: var(--dim); font-size: 11.5px; line-height: 1.55;
+  pointer-events: none;
+}
+.tipbubble b { color: var(--text); }
+.tipbubble i { color: #c6cbd9; }
 
 /* ---------------- stage ---------------- */
 #stage { flex: 1; display: flex; flex-direction: column; min-width: 0; }

@@ -251,6 +251,8 @@ js/apng.js            dependency-free lossless APNG encoder (CRC32 chunks,
                       adaptive PNG filtering, DEFLATE + stored fallback)
 js/history.js         undo/redo history (snapshot-based, same-control
                       coalescing, 60-step limit)
+js/infotips.js        hover info tips: the small (i) icons in section headers
+                      show each section's help in a shared floating bubble
 js/app.js             UI wiring, layer compositor, caches, exports, persistence,
                       project-file save/load (JSON), undo/redo integration
 tests/                geometry + unit verification (see below)

@@ -29,6 +29,7 @@
                maxlength="60" placeholder="Project name"
                title="Project name — travels with saved files and exports">
         <span id="saveState" class="sv ok" title="All changes are auto-saved in this browser">✓ saved</span>
+        <span class="infotip" tabindex="0" role="button" aria-label="Project help" aria-expanded="false"><span class="tipcontent" hidden>The project is auto-saved in this browser as you edit. <b>Save file</b> downloads it as one <b>JSON</b> file (all layers + custom palettes/gradients) — the format is documented in <b>docs/AGENT_GUIDE.md</b>, so agents can generate wallpapers by writing that file and loading it here. <b>Undo/Redo (Ctrl+Z / Ctrl+Y)</b> reverts any change, including layer operations and randomizers.</span></span>
       </div>
       <div class="prow btns">
         <button id="undoBtn" class="btn mini" title="Undo (Ctrl+Z)" disabled>↶ Undo</button>
@@ -37,12 +38,6 @@
         <button id="projLoadBtn" class="btn mini" title="Load a project JSON file">📂 Load</button>
         <input type="file" id="projFile" accept=".json,application/json" hidden>
       </div>
-      <p class="help">The project is auto-saved in this browser as you edit.
-        <b>Save file</b> downloads it as one <b>JSON</b> file (all layers + custom
-        palettes/gradients) — the format is documented in
-        <b>docs/AGENT_GUIDE.md</b>, so agents can generate wallpapers by writing
-        that file and loading it here. <b>Undo/Redo (Ctrl+Z / Ctrl+Y)</b> reverts
-        any change, including layer operations and randomizers.</p>
     </div>
 
     <div id="controls">
@@ -81,7 +76,7 @@
       </details>
 
       <details open>
-        <summary>Layers</summary>
+        <summary>Layers<span class="infotip push" tabindex="0" role="button" aria-label="Layers help" aria-expanded="false"><span class="tipcontent" hidden>Click a layer to edit it in the sections below. The <b>Background</b> layer is pinned to the bottom — it cannot be deleted or reordered. Every pattern layer keeps its own tiling, colors, effects and animation; exports render the whole stack. <b>Randomize layer</b> (and the 🎲 buttons in each section) act on the <b>selected layer only</b>.</span></span></summary>
         <div class="body">
           <div id="layerList"></div>
           <div class="row" id="layerOpacityRow">
@@ -101,17 +96,11 @@
           <div class="btnrow tight">
             <button id="layerRand" class="btn mini" title="Randomize ALL settings of the selected layer (R)">🎲 Randomize layer</button>
           </div>
-          <p class="help">Click a layer to edit it in the sections below.
-            The <b>Background</b> layer is pinned to the bottom — it cannot be
-            deleted or reordered. Every pattern layer keeps its own tiling,
-            colors, effects and animation; exports render the whole stack.
-            <b>Randomize layer</b> (and the 🎲 buttons in each section) act on
-            the <b>selected layer only</b>.</p>
         </div>
       </details>
 
       <details open id="sec-tiling">
-        <summary>Tiling <span class="sumhint" id="hintTiling"></span><button class="dice" id="randTiling" title="Randomize this layer's tiling (variant, scale, rotation, gap, seed)">🎲</button></summary>
+        <summary>Tiling <span class="sumhint" id="hintTiling"></span><span class="infotip" tabindex="0" role="button" aria-label="Tiling help" aria-expanded="false"><span class="tipcontent" hidden>Picks the tiling family, variant, scale, rotation, gap, outlines and the random seed <b>for the selected layer</b>. Fill transparency and border transparency are separate, so tiles can be faded independently of their wireframe. Changing family keeps this layer's colors; other layers are never touched.</span></span><button class="dice" id="randTiling" title="Randomize this layer's tiling (variant, scale, rotation, gap, seed)">🎲</button></summary>
         <div class="body">
           <div class="row">
             <label>Tiling family</label>
@@ -153,7 +142,7 @@
       </details>
 
       <details open id="sec-theme">
-        <summary>Color theme <span class="sumhint" id="hintTheme"></span><button class="dice" id="randTheme" title="Randomize this layer's colors within the current mode">🎲</button></summary>
+        <summary>Color theme <span class="sumhint" id="hintTheme"></span><span class="infotip" tabindex="0" role="button" aria-label="Color theme help" aria-expanded="false"><span class="tipcontent" hidden>Every mode keeps its own arrangement, settings and templates; edits apply to the <b>selected layer</b> live. <b>Auto outline</b> picks a border color from the palette/background; uncheck it to set a manual border color. The wallpaper background lives on the Background layer (see the Layers section). Saved templates and custom palettes/gradients persist in the browser and travel with the theme export/import files.</span></span><button class="dice" id="randTheme" title="Randomize this layer's colors within the current mode">🎲</button></summary>
         <div class="body">
           <div class="row">
             <label>Mode</label>
@@ -296,19 +285,12 @@
             <button id="themeImport" class="btn mini">⬇ Import</button>
             <input type="file" id="themeFile" accept=".json,application/json" hidden>
           </div>
-          <p class="help">Every mode keeps its own arrangement, editor and
-            templates; edits apply to the <b>selected layer</b> live. <b>Auto
-            outline</b> picks a border color from the palette/background;
-            uncheck it to set a manual border color. The wallpaper background
-            lives on the Background layer (see the Layers section). Saved
-            templates and custom palettes/gradients persist in the browser
-            and travel with the theme export/import files.</p>
         </div>
       </details>
 
       <!-- ======================= BACKGROUND LAYER ======================= -->
       <details open id="sec-bgprops">
-        <summary>Background layer<button class="dice" id="randBg" title="Randomize the background fill (solid color or gradient)">🎲</button></summary>
+        <summary>Background layer<span class="infotip push" tabindex="0" role="button" aria-label="Background layer help" aria-expanded="false"><span class="tipcontent" hidden>The Background layer is always at the bottom of the stack. It supports a solid color or a fully editable gradient (type, angle, stops) and never depends on the selected pattern layer. Hide it (eye icon in Layers) or set opacity below 100% to export PNG/APNG wallpapers with real transparency.</span></span><button class="dice" id="randBg" title="Randomize the background fill (solid color or gradient)">🎲</button></summary>
         <div class="body">
           <div class="row">
             <label for="bgFillSource">Fill</label>
@@ -353,16 +335,11 @@
               </div>
             </div>
           </div>
-          <p class="help">The Background layer is always at the bottom of the
-            stack. It supports a solid color or a fully editable gradient
-            (type, angle, stops) and never depends on the selected pattern
-            layer. Hide it (eye icon in Layers) or set opacity below 100% to
-            export PNG/APNG wallpapers with real transparency.</p>
         </div>
       </details>
 
       <details id="sec-fx">
-        <summary>Visual effects <span class="sumhint" id="hintFx"></span><button class="dice" id="randFx" title="Randomize this layer's effects">🎲</button></summary>
+        <summary>Visual effects <span class="sumhint" id="hintFx"></span><span class="infotip" tabindex="0" role="button" aria-label="Visual effects help" aria-expanded="false"><span class="tipcontent" hidden>Effects apply to the selected layer only — in the live preview and in every export format alike. 0 = off.</span></span><button class="dice" id="randFx" title="Randomize this layer's effects">🎲</button></summary>
         <div class="body">
           <div class="row">
             <label>Blur <output id="fxBlurVal"></output></label>
@@ -407,13 +384,11 @@
               </select>
             </div>
           </div>
-          <p class="help">Effects apply to the selected layer only — in the
-            live preview and in every export format alike. 0 = off.</p>
         </div>
       </details>
 
       <details open id="sec-anim">
-        <summary>Animation <span class="sumhint" id="hintAnim"></span><button class="dice" id="randAnim" title="Randomize this layer's animation (effect, speed, direction)">🎲</button></summary>
+        <summary>Animation <span class="sumhint" id="hintAnim"></span><span class="infotip" tabindex="0" role="button" aria-label="Animation help" aria-expanded="false"><span class="tipcontent" hidden>Each layer animates independently on a shared timeline. Animated exports align every layer to one seamless loop.</span></span><button class="dice" id="randAnim" title="Randomize this layer's animation (effect, speed, direction)">🎲</button></summary>
         <div class="body">
           <div class="row">
             <label for="animSelect">Effect</label>
@@ -427,13 +402,11 @@
             <label>Speed <output id="animSpeedVal"></output></label>
             <input type="range" id="animSpeed" min="0.2" max="3" step="0.1">
           </div>
-          <p class="help">Each layer animates independently on a shared
-            timeline. Animated exports align every layer to one seamless loop.</p>
         </div>
       </details>
 
       <details open>
-        <summary>Export &amp; live wallpaper</summary>
+        <summary>Export &amp; live wallpaper<span class="infotip push" tabindex="0" role="button" aria-label="Export help" aria-expanded="false"><span class="tipcontent" hidden>Exports always render the complete layer stack at the canvas resolution chosen above — no third-party software or codec needed to play them. <b>PNG/APNG</b> keep true RGBA transparency when the Background layer is hidden or faded; <b>GIF</b> has no partial alpha, so transparent projects are flattened onto black. <b>GIF</b> is compact (256 colors + dithering); <b>APNG</b> is pixel-perfect lossless truecolor.<br><b>Windows:</b> install <i>Lively Wallpaper</i> (free) → Add Wallpaper → paste this page's URL as a web wallpaper, or drop the exported GIF/APNG in as a video wallpaper.<br><b>Android:</b> set the exported GIF/APNG with any “video live wallpaper” app, or use Wallpaper Engine.</span></span></summary>
         <div class="body">
           <div class="btnrow">
             <button id="pngBtn" class="btn">⬇ PNG</button>
@@ -442,34 +415,12 @@
           <div class="btnrow">
             <button id="apngBtn" class="btn">APNG (lossless)</button>
           </div>
-          <p class="help">
-            Exports always render the complete layer stack at the canvas
-            resolution chosen above — no third-party software or codec needed
-            to play them. <b>PNG/APNG</b> keep true RGBA transparency when the
-            Background layer is hidden or faded; <b>GIF</b> has no partial
-            alpha, so transparent projects are flattened onto black.
-            <b>GIF</b> is compact (256 colors + dithering); <b>APNG</b> is
-            pixel-perfect lossless truecolor.
-            <b>Windows:</b> install <i>Lively Wallpaper</i> (free) → Add
-            Wallpaper → paste this page's URL as a web wallpaper, or drop the
-            exported GIF/APNG in as a video wallpaper.<br>
-            <b>Android:</b> set the exported GIF/APNG with any “video live
-            wallpaper” app, or use Wallpaper Engine.
-          </p>
         </div>
       </details>
 
       <details>
-        <summary>About</summary>
+        <summary>About<span class="infotip push" tabindex="0" role="button" aria-label="About help" aria-expanded="false"><span class="tipcontent" hidden>A studio for the aperiodic <b>Einstein hat</b> monotile (Smith, Myers, Kaplan &amp; Goodman-Strauss 2023 — <i>An Aperiodic Monotile</i>, arXiv:2303.10798) plus a collection of mathematically verified periodic and composite tilings: honeycombs, kagome, octagon–square, Cairo pentagons (dual of the snub square tiling), herringbone, Penrose rhombs (dual of a de Bruijn pentagrid) and more.</span></span></summary>
         <div class="body">
-          <p class="help">
-            A studio for the aperiodic <b>Einstein hat</b> monotile (Smith, Myers,
-            Kaplan &amp; Goodman-Strauss 2023 — <i>An Aperiodic Monotile</i>,
-            arXiv:2303.10798) plus a collection of mathematically verified
-            periodic and composite tilings: honeycombs, kagome, octagon–square,
-            Cairo pentagons (dual of the snub square tiling), herringbone,
-            Penrose rhombs (dual of a de Bruijn pentagrid) and more.
-          </p>
           <div class="btnrow">
             <button id="fsBtn" class="btn">⛶ Fullscreen</button>
             <button id="resetBtn" class="btn ghost">Reset</button>
@@ -496,6 +447,7 @@
 <script src="js/effects.js"></script>
 <script src="js/gif.js"></script>
 <script src="js/apng.js"></script>
+<script src="js/infotips.js"></script>
 <script src="js/render.js"></script>
 <script src="js/app.js"></script>
 </body>
