@@ -1,7 +1,7 @@
 /*
  * effects.js — post-processing visual effects pipeline for EinsteinWallpaper.
  *
- * Pipeline (shared by live preview, PNG export and WebM recording):
+ * Pipeline (shared by live preview, PNG export and animated exports):
  *   1. paint background (solid color or gradient) onto the target canvas
  *   2. composite the scene canvas once, with optional blur filter and/or
  *      drop shadow (ctx.shadow*) — the scene canvas has a transparent

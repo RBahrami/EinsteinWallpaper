@@ -6,7 +6,7 @@
 
   const HT = window.HatTiling, R = window.Renderer, PAL = window.Palettes,
     TL = window.Tilings, GR = window.Gradients, CP = window.CustomPalettes,
-    FX = window.Effects;
+    FX = window.Effects, AP = window.Apng;
 
   /* ------------------------------------------------------- presets */
 
@@ -45,14 +45,21 @@
     ['glowwave', 'Glow Wave'],
   ];
 
-  const MODE_LABELS = {
+  const THEME_MODES = [
+    ['single', 'Single'], ['palette', 'Palette'],
+    ['gradient', 'Gradient'], ['duotone', 'Duotone'],
+  ];
+  const THEME_MODE_IDS = THEME_MODES.map((m) => m[0]);
+  const MAP_LABELS = {
     supertile: 'Supertiles (patches)',
     kind: 'By tile kind',
     orientation: 'By orientation',
     mirror: 'Mirror split',
-    gradient: 'Gradient sweep',
+    checker: 'Checkerboard',
     random: 'Random mix',
-    solid: 'Solid color',
+    sweep: 'Sweep',
+    bands: 'Bands',
+    single: 'Uniform',
   };
 
   const FX_DEFAULTS = {
@@ -66,9 +73,11 @@
     resW: 1920, resH: 1080,
     family: 'hat', tileSize: 34, variant: 'H', rotation: 0, panX: 0, panY: 0,
     gap: 0.02, outlineWidth: 1.2,
-    colorMode: 'supertile',
+    themeMode: 'palette',
+    colorMap: 'supertile', gradMap: 'sweep', gradBands: 5, duoMap: 'checker',
+    singleColor: '#5bc8ff', duoA: '#5bc8ff', duoB: '#f4777f',
     paletteRef: { kind: 'builtin', index: 0 },
-    colorSource: 'palette', gradientId: null, bgSource: 'palette',
+    gradientId: null, bgSource: 'theme', bgColor: '#0b1020',
     lineAuto: true, lineColor: '#101014',
     animation: 'shimmer', animSpeed: 1, flowAngle: 30,
     effects: { ...FX_DEFAULTS },
@@ -85,11 +94,31 @@
       const saved = localStorage.getItem('einstein-wallpaper-v1');
       if (saved) {
         const s = JSON.parse(saved);
+        // migration: pre-theme settings -> unified color theme
+        if (!s.themeMode) {
+          const cm = s.colorMode || 'supertile';
+          if (cm === 'solid') {
+            p.themeMode = 'single';
+          } else {
+            p.themeMode = s.colorSource === 'gradient' ? 'gradient' : 'palette';
+            if (cm !== 'gradient') p.colorMap = cm;
+            p.gradMap = cm === 'gradient' ? 'sweep' : 'random';
+          }
+          if (s.bgSource === 'gradient') p.bgSource = 'gradient';
+        }
         Object.assign(p, s);
         // migration: legacy numeric palette -> builtin ref
         if (typeof s.palette === 'number' && !s.paletteRef) {
           p.paletteRef = { kind: 'builtin', index: s.palette };
         }
+        delete p.colorMode; delete p.colorSource;
+        if (!THEME_MODE_IDS.includes(p.themeMode)) p.themeMode = 'palette';
+        if (!['theme', 'gradient', 'custom'].includes(p.bgSource)) p.bgSource = 'theme';
+        if (!GR.isHexColor(p.singleColor)) p.singleColor = DEFAULTS.singleColor;
+        if (!GR.isHexColor(p.duoA)) p.duoA = DEFAULTS.duoA;
+        if (!GR.isHexColor(p.duoB)) p.duoB = DEFAULTS.duoB;
+        if (!GR.isHexColor(p.bgColor)) p.bgColor = DEFAULTS.bgColor;
+        p.gradBands = Math.max(2, Math.min(12, +p.gradBands || 5));
         if (!TL.isFamily(p.family)) p.family = 'hat';
         if (p.family === 'hat' && !['H', 'P', 'F'].includes(p.variant)) p.variant = 'H';
         p.effects = Object.assign({}, FX_DEFAULTS, s.effects || {});
@@ -126,6 +155,45 @@
     if (a.kind === 'builtin' && b.kind === 'builtin') return a.index === b.index;
     if (a.kind === 'custom' && b.kind === 'custom') return a.id === b.id;
     return false;
+  }
+
+  /* ------------------------------------------- color theme helpers */
+
+  // arrangement options available for the active theme mode + family
+  function arrOptions() {
+    const fam = currentFamily();
+    const kind = fam.id === 'hat' ? 'hat' : (fam.id === 'lines' ? 'line' : 'poly');
+    if (P.themeMode === 'palette') {
+      if (kind === 'hat') return ['supertile', 'orientation', 'mirror', 'checker', 'random'];
+      if (kind === 'poly') return ['kind', 'orientation', 'checker', 'random'];
+      return ['orientation', 'random'];
+    }
+    if (P.themeMode === 'gradient') return ['sweep', 'bands', 'random'];
+    if (P.themeMode === 'duotone') return ['checker', 'sweep', 'random'];
+    return ['single'];
+  }
+  function mapKey() {
+    return P.themeMode === 'palette' ? 'colorMap'
+      : P.themeMode === 'gradient' ? 'gradMap' : 'duoMap';
+  }
+  // the colorMap value colorize() should use for the active theme mode
+  function currentMap() {
+    if (P.themeMode === 'single') return 'single';
+    if (P.themeMode === 'gradient') return P.gradMap;
+    if (P.themeMode === 'duotone') return P.duoMap;
+    return P.colorMap;
+  }
+  function ensureMapValid() {
+    if (P.themeMode === 'single') return;
+    const opts = arrOptions();
+    if (!opts.includes(P[mapKey()])) P[mapKey()] = opts[0];
+  }
+  function setThemeMode(mode) {
+    if (!THEME_MODE_IDS.includes(mode)) mode = 'palette';
+    P.themeMode = mode;
+    if (mode === 'gradient' && P.bgSource === 'theme') P.bgSource = 'gradient';
+    ensureMapValid();
+    syncControls(); recolor(true); save();
   }
 
   /* ----------------------------------------------------------- dom */
@@ -207,9 +275,7 @@
         if (P.family === fam.id) return;
         P.family = fam.id;
         P.variant = fam.defaultVariant;
-        if (!fam.modes.includes(P.colorMode)) {
-          P.colorMode = fam.modes.includes('random') ? 'random' : fam.modes[0];
-        }
+        ensureMapValid();
         syncControls(); refresh(); save();
       };
       grid.appendChild(b);
@@ -243,7 +309,7 @@
     b.title = pal.name + (ref.kind === 'custom' ? ' (custom)' : '');
     b.style.background = `linear-gradient(135deg, ${pal.colors.join(',')})`;
     b.style.borderColor = on ? '#fff' : 'rgba(255,255,255,.15)';
-    b.onclick = () => { P.paletteRef = ref; buildPaletteGrid(); syncPalEditorSelect(); refresh(); save(); };
+    b.onclick = () => { P.paletteRef = ref; buildPaletteGrid(); syncPalEditorSelect(); recolor(false); save(); };
     return b;
   }
 
@@ -429,7 +495,7 @@
   const sceneCtx = sceneCanvas.getContext('2d');
 
   let scene = null, look = null, animator = null;
-  let animRaf = 0, recording = false;
+  let animRaf = 0;
 
   function previewSize() {
     const box = $('canvasWrap').getBoundingClientRect();
@@ -446,27 +512,41 @@
   function makeLook() {
     const pal = PAL.get(P.paletteRef);
     let lut;
-    if (P.colorSource === 'gradient') {
+    if (P.themeMode === 'single') {
+      lut = R.buildSolidLut(P.singleColor);
+    } else if (P.themeMode === 'gradient') {
       lut = R.buildLut({ _isGradient: true, gradient: GR.normalize(currentGradient()) });
+    } else if (P.themeMode === 'duotone') {
+      lut = R.buildLut({
+        _isGradient: true,
+        gradient: GR.normalize({
+          type: 'linear', angle: 0,
+          stops: [{ pos: 0, color: P.duoA }, { pos: 1, color: P.duoB }],
+        }),
+      });
     } else {
       lut = R.buildLut(P.paletteRef);
     }
-    let line;
-    if (P.lineAuto) {
-      const bgRef = P.bgSource === 'gradient' ? GR.sample(GR.normalize(currentGradient()), 0.5) : pal.bg;
-      line = PAL.autoLineColor(bgRef);
-    } else {
-      line = P.lineColor;
-    }
-    const look = { lut, line, bg: pal.bg, gap: P.gap, outlineWidth: P.outlineWidth };
-    if (P.bgSource === 'gradient') {
+    // background is mode-scoped: palette -> its bg color (or custom),
+    // gradient -> the gradient itself (or a solid color), single/duotone -> custom color
+    let bg, bgPaint = null;
+    const bgSrc = (P.themeMode === 'palette' || P.themeMode === 'gradient') ? P.bgSource : 'custom';
+    if (P.themeMode === 'gradient' && bgSrc === 'gradient') {
       const grad = GR.normalize(currentGradient());
-      look.bgPaint = (ctx, W, H) => {
+      bg = GR.sample(grad, 0.5);
+      bgPaint = (ctx, W, H) => {
         const g = GR.toCanvas(ctx, grad, W, H, 0);
         if (g && g.conic) GR.fillConic(ctx, grad, W, H);
         else { ctx.fillStyle = g; ctx.fillRect(0, 0, W, H); }
       };
+    } else if (P.themeMode === 'palette' && bgSrc === 'theme') {
+      bg = pal.bg;
+    } else {
+      bg = P.bgColor;
     }
+    const line = P.lineAuto ? PAL.autoLineColor(bg) : P.lineColor;
+    const look = { lut, line, bg, gap: P.gap, outlineWidth: P.outlineWidth };
+    if (bgPaint) look.bgPaint = bgPaint;
     return look;
   }
 
@@ -487,6 +567,7 @@
     const budget = (P.animation === 'none' ? 450000 : 120000);
     scene = R.buildScene(p, ps.w, ps.h, { budget });
     if (!scene) { statusEl.textContent = 'failed to build tiling'; return; }
+    p.colorMap = currentMap();
     R.colorize(scene, p);
     look = makeLook();
     animator = R.makeAnimator(scene, p, look);
@@ -519,6 +600,18 @@
       animator && animator.overlayFn ? (c) => animator.overlayFn(c, t) : null);
   }
 
+  // live re-color: recompute the tile map and/or the color LUT and repaint
+  // the scene canvas without rebuilding tiling geometry (cheap enough to
+  // run on every color-input event)
+  function recolor(rebuildMap) {
+    if (!scene) return;
+    if (rebuildMap) R.colorize(scene, Object.assign({}, P, { colorMap: currentMap() }));
+    look = makeLook();
+    animator = R.makeAnimator(scene, P, look);
+    R.paintScene(sceneCtx, scene, P, look);
+    composeFrame(performance.now());
+  }
+
   function loop(t) {
     animRaf = requestAnimationFrame(loop);
     if (P.animation === 'none') return;
@@ -549,6 +642,7 @@
     const offScene = document.createElement('canvas');
     offScene.width = P.resW; offScene.height = P.resH;
     const p = Object.assign({}, P, { animation: 'none' });
+    p.colorMap = currentMap();
     const sc = R.buildScene(p, P.resW, P.resH, { budget: 500000 });
     if (!sc) { statusEl.textContent = 'export failed'; return; }
     R.colorize(sc, p);
@@ -556,11 +650,10 @@
     const sctx = offScene.getContext('2d');
     R.paintScene(sctx, sc, p, lk);
     FX.compose(off.getContext('2d'), offScene, P.resW, P.resH, lk, fxParams());
-    const famTag = P.family === 'hat' ? 'einstein' : P.family;
-    off.toBlob((blob) => {
+  off.toBlob((blob) => {
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = `${famTag}-${P.resW}x${P.resH}.png`;
+      a.download = `${famTag()}-${P.resW}x${P.resH}.png`;
       a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 5000);
       const n = sc.kind === 'hat' ? sc.hats.length : sc.tiles.length;
@@ -568,7 +661,65 @@
     }, 'image/png');
   }
 
-  /* ------------------------------------------------ GIF export */
+  /* ------------------------------------------- animated exports */
+
+  const tickAsync = () => new Promise((r) => setTimeout(r, 0));
+  function famTag() { return P.family === 'hat' ? 'einstein' : P.family; }
+  function downloadBlob(blob, name) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  }
+
+  // Shared animated-export pipeline: the scene is rebuilt at the EXACT
+  // canvas resolution chosen by the user (same geometry math as PNG export
+  // and the preview — scale factor 1:1), then frames are rendered by
+  // stepping the animation deterministically through one seamless loop.
+  function buildLoopExport() {
+    const W = P.resW, H = P.resH;
+    const p = Object.assign({}, P);
+    p.colorMap = currentMap();
+    const sc = R.buildScene(p, W, H, { budget: P.animation === 'none' ? 500000 : 200000 });
+    if (!sc) return null;
+    R.colorize(sc, p);
+    const lk = makeLook();
+    const animator = R.makeAnimator(sc, p, lk);
+    const sceneC = document.createElement('canvas');
+    sceneC.width = W; sceneC.height = H;
+    const sctx = sceneC.getContext('2d');
+    const outC = document.createElement('canvas');
+    outC.width = W; outC.height = H;
+    const octx = outC.getContext('2d');
+    // paint the static scene ONCE into the scene canvas: per-tile
+    // animations repaint it every frame, overlay animations (flow /
+    // glow wave) and static exports composite this painted base
+    R.paintScene(sctx, sc, p, lk);
+    const renderAt = (t) => {
+      const overlay = animator && animator.overlayFn ? (c) => animator.overlayFn(c, t) : null;
+      if (animator && animator.perTile) {
+        sctx.clearRect(0, 0, W, H);
+        animator.frame(sctx, t);
+      }
+      FX.compose(octx, sceneC, W, H, lk, fxParams(), overlay);
+    };
+    return { W, H, sc, octx, renderAt, animator };
+  }
+
+  // pick frame count x delay (whole centiseconds) so that
+  // frames x delay x 10ms lands closest to the true loop period
+  function solveLoopTiming(periodMs) {
+    let best = null;
+    for (let d = 3; d <= 15; d++) {
+      const f = Math.round(periodMs / (d * 10));
+      if (f < 2 || f > 200) continue;
+      const err = Math.abs(f * d * 10 - periodMs);
+      if (!best || err < best.err) best = { d, f, err };
+    }
+    if (!best) best = { d: 6, f: Math.max(2, Math.min(200, Math.round(periodMs / 60))) };
+    return { frames: best.f, delayCs: best.d };
+  }
 
   let gifBusy = false;
   async function exportGIF() {
@@ -576,50 +727,15 @@
     gifBusy = true;
     const btn = $('gifBtn');
     const orig = btn.textContent;
-    const tick = () => new Promise((r) => setTimeout(r, 0));
     try {
-      // cap the long edge at 800px (GIF is uncompressed-ish; keep files sane)
-      const scale = Math.min(1, 800 / Math.max(P.resW, P.resH));
-      const W = Math.max(2, Math.round(P.resW * scale) & ~1);
-      const H = Math.max(2, Math.round(P.resH * scale) & ~1);
-      const p = Object.assign({}, P, { tileSize: P.tileSize * (W / P.resW) });
-      const sc = R.buildScene(p, W, H, { budget: P.animation === 'none' ? 200000 : 120000 });
-      if (!sc) { statusEl.textContent = 'GIF export failed'; return; }
-      R.colorize(sc, p);
-      const lk = makeLook();
-      const animator = R.makeAnimator(sc, p, lk);
-
-      const sceneC = document.createElement('canvas');
-      sceneC.width = W; sceneC.height = H;
-      const sctx = sceneC.getContext('2d');
-      const outC = document.createElement('canvas');
-      outC.width = W; outC.height = H;
-      const octx = outC.getContext('2d');
-      const renderAt = (t) => {
-        const overlay = animator && animator.overlayFn ? (c) => animator.overlayFn(c, t) : null;
-        if (animator && animator.perTile) {
-          sctx.clearRect(0, 0, W, H);
-          animator.frame(sctx, t);
-        }
-        FX.compose(octx, sceneC, W, H, lk, fxParams(), overlay);
-      };
-
-      // capture exactly one animation loop (seamless) when periodic;
-      // GIF delays are whole centiseconds, so pick the delay whose
-      // frames x delay x 10ms lands closest to the true period
+      statusEl.textContent = 'rendering GIF frames…';
+      await tickAsync();
+      const prep = buildLoopExport();
+      if (!prep) { statusEl.textContent = 'GIF export failed'; return; }
+      const { W, H, octx, renderAt, animator } = prep;
       const period = animator && animator.periodMs ? animator.periodMs : 0;
       let frames = 1, delayCs = 0;
-      if (period > 0) {
-        let best = null;
-        for (let d = 3; d <= 15; d++) {
-          const f = Math.round(period / (d * 10));
-          if (f < 2 || f > 200) continue;
-          const err = Math.abs(f * d * 10 - period);
-          if (!best || err < best.err) best = { d, f, err };
-        }
-        if (!best) best = { d: 6, f: Math.max(2, Math.min(200, Math.round(period / 60))) };
-        frames = best.f; delayCs = best.d;
-      }
+      if (period > 0) ({ frames, delayCs } = solveLoopTiming(period));
 
       // one global palette from a spread of sample frames keeps colors
       // stable across the animation (no per-frame palette flicker)
@@ -628,7 +744,8 @@
       for (let s = 0; s < nS; s++) {
         renderAt(Math.round((s * frames) / nS) * delayCs * 10);
         samples.push(new Uint8ClampedArray(octx.getImageData(0, 0, W, H).data));
-        await tick();
+        btn.textContent = `palette ${Math.round(((s + 1) / nS) * 100)}%`;
+        await tickAsync();
       }
       const pal = Gif.buildPalette(samples, 256);
       const map = Gif.createMapper(pal);
@@ -637,63 +754,53 @@
       for (let i = 0; i < frames; i++) {
         renderAt(i * delayCs * 10);
         writer.addFrame(map(octx.getImageData(0, 0, W, H).data, W, H), delayCs);
-        if ((i & 3) === 3) {
-          btn.textContent = `${Math.round(((i + 1) / frames) * 100)}%`;
-          await tick();
-        }
+        btn.textContent = `${Math.round(((i + 1) / frames) * 100)}%`;
+        if ((i & 1) === 1) await tickAsync();
       }
       const bytes = writer.finish();
-      const blob = new Blob([bytes], { type: 'image/gif' });
-      const famTag = P.family === 'hat' ? 'einstein' : P.family;
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = `${famTag}-live-${frames}f-${W}x${H}.gif`;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-      statusEl.textContent = `GIF saved · ${frames} frame${frames > 1 ? 's' : ''} · ${W}x${H} · ${(blob.size / 1048576).toFixed(1)} MB`;
+      downloadBlob(new Blob([bytes], { type: 'image/gif' }),
+        `${famTag()}-live-${frames}f-${W}x${H}.gif`);
+      statusEl.textContent = `GIF saved · ${frames} frame${frames > 1 ? 's' : ''} · ${W}x${H} · ${(bytes.length / 1048576).toFixed(1)} MB`;
     } finally {
       btn.textContent = orig;
       gifBusy = false;
     }
   }
 
-  function recordWebM(seconds) {
-    if (recording) return;
-    recording = true;
-    const btn = $('recordBtn');
+  let apngBusy = false;
+  async function exportAPNG() {
+    if (apngBusy) return;
+    apngBusy = true;
+    const btn = $('apngBtn');
     const orig = btn.textContent;
-    const mime = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm']
-      .find((m) => window.MediaRecorder && MediaRecorder.isTypeSupported(m));
-    if (!mime) { statusEl.textContent = 'MediaRecorder not supported in this browser'; recording = false; return; }
-    const stream = canvas.captureStream(30);
-    const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 12_000_000 });
-    const chunks = [];
-    rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
-    rec.onstop = () => {
-      const blob = new Blob(chunks, { type: 'video/webm' });
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = `wallpaper-live-${P.animation}-${seconds}s.webm`;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-      btn.textContent = orig; recording = false;
-      statusEl.textContent = `WebM saved (${(blob.size / 1048576).toFixed(1)} MB)`;
-    };
-    btn.textContent = `● recording ${seconds}s…`;
-    if (P.animation === 'none') {
-      P.animation = 'shimmer';
-      fillSelect($('animSelect'), ANIMS, P.animation);
-      syncAnimVisibility();
-      refresh();
+    try {
+      statusEl.textContent = 'rendering APNG frames…';
+      await tickAsync();
+      const prep = buildLoopExport();
+      if (!prep) { statusEl.textContent = 'APNG export failed'; return; }
+      const { W, H, octx, renderAt, animator } = prep;
+      const period = animator && animator.periodMs ? animator.periodMs : 0;
+      let frames = 1, delayCs = 0;
+      if (period > 0) ({ frames, delayCs } = solveLoopTiming(period));
+      const enc = new AP.ApngEncoder(W, H, { totalFrames: frames, delayNum: delayCs * 10, delayDen: 1000 });
+      enc.start();
+      for (let i = 0; i < frames; i++) {
+        renderAt(i * delayCs * 10);
+        await enc.addFrame(octx.getImageData(0, 0, W, H).data);
+        btn.textContent = `${Math.round(((i + 1) / frames) * 100)}%`;
+        await tickAsync();
+      }
+      const bytes = enc.finish();
+      downloadBlob(new Blob([bytes], { type: 'image/apng' }),
+        `${famTag()}-live-${frames}f-${W}x${H}.png`);
+      statusEl.textContent = `APNG saved · ${frames} frame${frames > 1 ? 's' : ''} · ${W}x${H} · ${(bytes.length / 1048576).toFixed(1)} MB (lossless)`;
+    } finally {
+      btn.textContent = orig;
+      apngBusy = false;
     }
-    rec.start();
-    let elapsed = 0;
-    const iv = setInterval(() => {
-      elapsed += 1;
-      btn.textContent = `● recording ${seconds - elapsed}s…`;
-      if (elapsed >= seconds) { clearInterval(iv); rec.stop(); }
-    }, 1000);
   }
+
+  /* ------------------------------------------------ randomize */
 
   function randomize() {
     const rr = Math.random;
@@ -701,17 +808,33 @@
     P.family = rr() < 0.35 ? 'hat' : TL.FAMILIES[1 + Math.floor(rr() * (TL.FAMILIES.length - 1))].id;
     const fam = currentFamily();
     P.variant = fam.variants[Math.floor(rr() * fam.variants.length)].id;
-    P.colorMode = fam.modes[Math.floor(rr() * fam.modes.length)];
-    const nB = PAL.LIST.length, nC = CP.count();
-    P.paletteRef = (nC && rr() < 0.25)
-      ? { kind: 'custom', id: CP.list()[Math.floor(rr() * nC)].id }
-      : { kind: 'builtin', index: Math.floor(rr() * nB) };
-    P.colorSource = rr() < 0.2 ? 'gradient' : 'palette';
-    if (P.colorSource === 'gradient') {
+    const vivid = ['#5bc8ff', '#ff8bd2', '#ffe14d', '#6be3a2', '#b07bff', '#ff8a5b', '#4dffb8', '#f4777f'];
+    const tm = rr();
+    P.themeMode = tm < 0.45 ? 'palette' : tm < 0.72 ? 'gradient' : tm < 0.9 ? 'duotone' : 'single';
+    if (P.themeMode === 'palette') {
+      const nB = PAL.LIST.length, nC = CP.count();
+      P.paletteRef = (nC && rr() < 0.25)
+        ? { kind: 'custom', id: CP.list()[Math.floor(rr() * nC)].id }
+        : { kind: 'builtin', index: Math.floor(rr() * nB) };
+      const pOpts = arrOptions();
+      P.colorMap = pOpts[Math.floor(rr() * pOpts.length)];
+      P.bgSource = rr() < 0.85 ? 'theme' : 'custom';
+    } else if (P.themeMode === 'gradient') {
       const all = GR.all();
       P.gradientId = all[Math.floor(rr() * all.length)].id;
+      const gm = rr();
+      P.gradMap = gm < 0.55 ? 'sweep' : gm < 0.8 ? 'bands' : 'random';
+      P.gradBands = 3 + Math.floor(rr() * 6);
+      P.bgSource = rr() < 0.4 ? 'gradient' : 'custom';
+    } else if (P.themeMode === 'duotone') {
+      P.duoA = vivid[Math.floor(rr() * vivid.length)];
+      P.duoB = PAL.hslRotate(P.duoA, 110 + rr() * 140);
+      P.duoMap = ['checker', 'sweep', 'random'][Math.floor(rr() * 3)];
+      P.bgColor = PAL.shade(P.duoA, 0.22);
+    } else {
+      P.singleColor = vivid[Math.floor(rr() * vivid.length)];
+      P.bgColor = PAL.shade(P.singleColor, 0.2);
     }
-    P.bgSource = rr() < 0.15 ? 'gradient' : 'palette';
     P.animation = ['none', 'shimmer', 'flow', 'glowwave'][Math.floor(rr() * 4)];
     P.flowAngle = Math.floor(rr() * 24) * 15;
     P.rotation = Math.floor(rr() * 24) * 15;
@@ -740,6 +863,52 @@
     const showAngle = P.animation === 'flow' || P.animation === 'glowwave';
     $('flowAngleRow').style.display = showAngle ? '' : 'none';
   }
+
+  /* --------------------------------- color theme control building */
+
+  function buildThemeControls() {
+    const box = $('themeModeChips');
+    box.innerHTML = '';
+    for (const [m, label] of THEME_MODES) {
+      const b = document.createElement('button');
+      b.className = 'chip' + (P.themeMode === m ? ' on' : '');
+      b.textContent = label;
+      b.onclick = () => setThemeMode(m);
+      box.appendChild(b);
+    }
+    ensureMapValid();
+    fillSelect($('themeMap'), arrOptions().map((m) => [m, MAP_LABELS[m] || m]), P[mapKey()]);
+    $('themeBands').value = P.gradBands;
+    $('themeBandsVal').textContent = P.gradBands;
+    $('singleColor').value = P.singleColor;
+    $('duoA').value = P.duoA;
+    $('duoB').value = P.duoB;
+    fillSelect($('gradPick'), GR.all().map((g) => [g.id, g.name]), P.gradientId);
+    const bgSel = $('bgSource');
+    if (P.themeMode === 'palette') {
+      fillSelect(bgSel, [['theme', 'From palette'], ['custom', 'Custom color']],
+        P.bgSource === 'gradient' ? 'theme' : P.bgSource);
+    } else if (P.themeMode === 'gradient') {
+      fillSelect(bgSel, [['custom', 'Solid color'], ['gradient', 'Gradient']],
+        P.bgSource === 'theme' ? 'custom' : P.bgSource);
+    }
+    $('bgColor').value = P.bgColor;
+    syncThemeVisibility();
+  }
+
+  // show only the options that belong to the active theme mode
+  function syncThemeVisibility() {
+    const mode = P.themeMode;
+    const show = (id, on) => { $(id).style.display = on ? '' : 'none'; };
+    show('themeMapRow', mode !== 'single');
+    show('themeBandsRow', mode === 'gradient' && P.gradMap === 'bands');
+    show('singleColorRow', mode === 'single');
+    show('duoRow', mode === 'duotone');
+    show('paletteRow', mode === 'palette');
+    show('gradientRow', mode === 'gradient');
+    show('bgSourceWrap', mode === 'palette' || mode === 'gradient');
+    show('bgColorWrap', mode === 'single' || mode === 'duotone' || P.bgSource === 'custom');
+  }
   function syncFamilyVisibility() {
     const isLine = P.family === 'lines';
     $('gapRow').style.display = isLine ? 'none' : '';
@@ -758,10 +927,8 @@
     buildPaletteGrid();
     const fam = currentFamily();
     fillSelect($('variantSelect'), fam.variants.map((v) => [v.id, v.name]), P.variant);
-    fillSelect($('modeSelect'), fam.modes.map((m) => [m, MODE_LABELS[m] || m]), P.colorMode);
     fillSelect($('animSelect'), ANIMS, P.animation);
-    fillSelect($('colorSource'), [['palette', 'Palette'], ['gradient', 'Gradient']], P.colorSource);
-    fillSelect($('bgSource'), [['palette', 'Solid (palette)'], ['gradient', 'Gradient']], P.bgSource);
+    buildThemeControls();
     setSlider('tileSize', 'tileSizeVal', P.tileSize, (v) => v + ' px');
     setSlider('rotation', 'rotationVal', P.rotation, (v) => v + '°');
     setSlider('gap', 'gapVal', Math.round(P.gap * 100), (v) => v + '%');
@@ -783,8 +950,6 @@
     $('lineAuto').checked = P.lineAuto;
     $('lineColor').value = P.lineColor;
     $('lineColor').disabled = P.lineAuto;
-    $('colorSource').value = P.colorSource;
-    $('bgSource').value = P.bgSource;
     const orBtns = document.querySelectorAll('[data-orient]');
     orBtns.forEach((b) => b.classList.toggle('on', b.dataset.orient === P.orientation));
     syncAnimVisibility();
@@ -824,13 +989,24 @@
     $('animSpeed').oninput = (e) => { P.animSpeed = +e.target.value; $('animSpeedVal').textContent = (+e.target.value).toFixed(1) + '×'; save(); };
     $('flowAngle').oninput = (e) => { P.flowAngle = +e.target.value; $('flowAngleVal').textContent = P.flowAngle + '°'; save(); };
     $('seed').oninput = (e) => { P.seed = +e.target.value || 1; $('seedVal').textContent = '#' + P.seed; refresh(); save(); };
-    $('modeSelect').onchange = (e) => { P.colorMode = e.target.value; refresh(); save(); };
     $('animSelect').onchange = (e) => { P.animation = e.target.value; syncAnimVisibility(); refresh(); save(); };
     $('variantSelect').onchange = (e) => { P.variant = e.target.value; refresh(); save(); };
-    $('colorSource').onchange = (e) => { P.colorSource = e.target.value; refresh(); save(); };
-    $('bgSource').onchange = (e) => { P.bgSource = e.target.value; refresh(); save(); };
-    $('lineAuto').onchange = (e) => { P.lineAuto = e.target.checked; $('lineColor').disabled = P.lineAuto; refresh(); save(); };
-    $('lineColor').oninput = (e) => { P.lineColor = e.target.value; refresh(); save(); };
+    // color theme
+    $('themeMap').onchange = (e) => { P[mapKey()] = e.target.value; recolor(true); save(); };
+    $('themeBands').oninput = (e) => { P.gradBands = Math.max(2, Math.min(12, +e.target.value || 5)); $('themeBandsVal').textContent = P.gradBands; recolor(true); save(); };
+    $('singleColor').oninput = (e) => { P.singleColor = e.target.value; recolor(false); save(); };
+    $('duoA').oninput = (e) => { P.duoA = e.target.value; recolor(false); save(); };
+    $('duoB').oninput = (e) => { P.duoB = e.target.value; recolor(false); save(); };
+    $('gradPick').onchange = (e) => {
+      P.gradientId = e.target.value;
+      gradEditId = P.gradientId;
+      syncGradEditorAll();
+      recolor(false); save();
+    };
+    $('bgSource').onchange = (e) => { P.bgSource = e.target.value; syncThemeVisibility(); recolor(false); save(); };
+    $('bgColor').oninput = (e) => { P.bgColor = e.target.value; recolor(false); save(); };
+    $('lineAuto').onchange = (e) => { P.lineAuto = e.target.checked; $('lineColor').disabled = P.lineAuto; recolor(false); save(); };
+    $('lineColor').oninput = (e) => { P.lineColor = e.target.value; recolor(false); save(); };
 
     // effects
     const fxBind = (id, key, valId, fmt, immediate) => {
@@ -961,7 +1137,7 @@
       const saved = GR.save(JSON.parse(JSON.stringify(gradDraft)));
       gradEditId = saved.id;
       P.gradientId = saved.id;
-      save(); syncGradEditorAll(); refresh();
+      save(); syncControls(); refresh();
       statusEl.textContent = 'gradient saved';
     };
     $('gradDelete').onclick = () => {
@@ -969,14 +1145,14 @@
       GR.remove(gradEditId);
       if (P.gradientId === gradEditId) P.gradientId = null;
       gradEditId = null;
-      syncGradEditorAll(); refresh(); save();
+      syncControls(); refresh(); save();
       statusEl.textContent = 'gradient deleted';
     };
 
     $('randomBtn').onclick = randomize;
     $('pngBtn').onclick = exportPNG;
     $('gifBtn').onclick = exportGIF;
-    $('recordBtn').onclick = () => recordWebM(+$('recDuration').value || 10);
+    $('apngBtn').onclick = exportAPNG;
     $('fsBtn').onclick = fullscreen;
     $('resetBtn').onclick = () => {
       P = JSON.parse(JSON.stringify(DEFAULTS));

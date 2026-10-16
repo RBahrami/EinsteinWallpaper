@@ -162,8 +162,21 @@
   /* ---------------- LZW compression ---------------- */
 
   function lzwEncode(indices, minCodeSize, out) {
-    const raw = [];
-    const emitByte = (b) => raw.push(b & 0xff);
+    // Codes are emitted straight into <=255-byte GIF sub-blocks (no
+    // intermediate byte array — full-resolution frames compress to
+    // megabytes and must not be materialized twice).
+    const subBuf = new Uint8Array(255);
+    let subLen = 0;
+    const flushSub = () => {
+      if (!subLen) return;
+      out(subLen);
+      for (let i = 0; i < subLen; i++) out(subBuf[i]);
+      subLen = 0;
+    };
+    const emitByte = (b) => {
+      subBuf[subLen++] = b & 0xff;
+      if (subLen === 255) flushSub();
+    };
     const clearCode = 1 << minCodeSize;
     const eoiCode = clearCode + 1;
     let codeSize = minCodeSize + 1;
@@ -197,12 +210,7 @@
     emitCode(cur);
     emitCode(eoiCode);
     if (bitCnt > 0) emitByte(bitBuf);
-    // package raw bytes into <=255-byte sub-blocks
-    for (let i = 0; i < raw.length; i += 255) {
-      const end = Math.min(raw.length, i + 255);
-      out(end - i);
-      for (let j = i; j < end; j++) out(raw[j]);
-    }
+    flushSub();
   }
 
   /* ---------------- GIF89a container ---------------- */
@@ -215,8 +223,15 @@
     while ((1 << bits) < nColors) bits++;
     const gctEntries = 1 << bits;
     const minCodeSize = Math.max(2, bits);
-    const out = [];
-    const push = (b) => { out.push(b & 0xff); };
+    // growable chunked byte buffer: full-resolution animated exports can
+    // reach hundreds of MB, which a plain JS number array cannot hold
+    const CHUNK = 1 << 16;
+    const chunks = [];
+    let cur = new Uint8Array(CHUNK), curLen = 0;
+    const push = (b) => {
+      if (curLen === CHUNK) { chunks.push(cur); cur = new Uint8Array(CHUNK); curLen = 0; }
+      cur[curLen++] = b & 0xff;
+    };
     const short = (v) => { push(v & 0xff); push((v >> 8) & 0xff); };
     const str = (s) => { for (let i = 0; i < s.length; i++) push(s.charCodeAt(i)); };
 
@@ -252,7 +267,13 @@
 
     this.finish = function () {
       push(0x3B); // trailer
-      return Uint8Array.from(out);
+      chunks.push(cur.subarray(0, curLen));
+      let total = 0;
+      for (const c of chunks) total += c.length;
+      const all = new Uint8Array(total);
+      let o = 0;
+      for (const c of chunks) { all.set(c, o); o += c.length; }
+      return all;
     };
   }
 

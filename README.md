@@ -2,11 +2,11 @@
 
 Generate wallpapers from the **Einstein tile** (the aperiodic "hat" monotile discovered
 in 2023 by David Smith, Joseph Samuel Myers, C. S. Kaplan and Chaim Goodman-Strauss) —
-**plus 13 more mathematically verified tiling families** — with custom palettes,
-gradient editors, visual effects and animations. Every image can be exported as a
-full-resolution **PNG**, a **looping animated GIF** (encoded in the browser, plays
-anywhere without extra software), or recorded as a **WebM video** for live
-wallpapers on Windows or Android.
+**plus 13 more mathematically verified tiling families** — with a unified color theme
+system, visual effects and animations. Every image can be exported as a full-resolution
+**PNG**, a **looping animated GIF**, or a **lossless APNG** (pixel-perfect animated
+PNG) — all encoded entirely in the browser and playable anywhere with no extra
+software, plugins or codecs.
 
 ![screenshot](docs/screenshot.png)
 
@@ -33,26 +33,39 @@ wallpapers on Windows or Android.
 Every family's geometry is verified by `tests/verify-tilings.js` (no overlaps, no
 holes, correct edge lengths, Penrose fat:thin ratio → φ, Cairo pentagon shape, etc.).
 
-### Color
-- **6 color modes** for the hat (Supertiles, By orientation, Mirror split,
-  Gradient sweep, Random mix, Solid) and family-appropriate modes for every other
-  tiling (By tile kind, By orientation, Gradient sweep, Random mix, Solid).
-- **26 curated built-in palettes** (unchanged from v1) — from Midnight and Nord to
-  Cyberpunk and Sakura, light and dark.
+### Color — one unified Color theme section
+
+A single **Color theme** panel with four modes; only the options that belong to
+the selected mode are shown:
+
+| Mode | Options |
+|------|---------|
+| **Single** | one tile color + background color |
+| **Palette** | arrangement (how colors spread across tiles) + the 26 built-in palettes + your custom palettes + background (from palette or custom color) |
+| **Gradient** | arrangement (continuous **Sweep**, quantized **Bands**, or **Random mix**) + gradient picker + background (solid color or the gradient itself) |
+| **Duotone** | two colors A/B + arrangement (checkerboard / sweep / random) + background color |
+
+The **arrangement** is family-aware: the hat offers Supertiles (patches), By
+orientation, Mirror split, Checkerboard and Random mix; periodic families offer
+By tile kind, By orientation, Checkerboard and Random mix.
+
+- **26 curated built-in palettes** — from Midnight and Nord to Cyberpunk and
+  Sakura, light and dark.
 - **Custom palette editor** — create, rename, duplicate and delete palettes; edit
   colors with native pickers or hex values; add/remove/reorder colors; set the
   background and outline colors (with the automatic outline feature); live preview.
 - **Gradient editor** — multi-stop gradients with per-stop color and position,
-  linear / radial / conic types, angle control, live preview; use gradients to
-  color the tiling (continuous sampling, not discrete cycling) and/or as the
-  background. Built-in gradients included.
+  linear / radial / conic types, angle control, live preview; the gradient
+  selected in the theme section colors the tiling (continuous sampling) and/or
+  the background. Built-in gradients included.
 - **Theme import/export** — custom palettes + gradients as a validated JSON file.
+- Every color change re-colors the live preview instantly (no scene rebuild).
 
 ### Visual effects
 Blur, Glow (intensity + radius), Shadow/depth (strength + softness + offset),
 film Grain, and Vignette (darken or lighten edges). All default to neutral/off,
-all are applied identically to the live preview, exported PNGs and recorded WebM
-videos, and all work with every tiling family.
+all are applied identically to the live preview and to every export format, and
+all work with every tiling family.
 
 ### Animation
 - **None** (static — no frames rendered),
@@ -68,22 +81,30 @@ The removed v1 animations (Cascade, Drift, Hue cycle, Pulse) are gone.
   (9:16, 9:19.5, 9:20) with standard resolutions from 720p to 4K+, plus custom
   sizes up to 8192 px.
 - Tile scale, rotation, tile gap, outline width/color, seeded randomization.
-- Full-resolution **PNG export**, looping **animated GIF export** (encoded entirely
-  in the browser — no libraries, no external software needed to play it), and
-  **WebM recording** (MediaRecorder), all including every effect and animation.
-  GIF captures exactly one seamless animation loop (the encoder solves frame
-  delay × count against the true loop period), uses one global 256-color
-  palette with error-diffusion dithering, long edge capped at 800 px to keep
-  files manageable. WebM stays the compact/high-quality option; GIF plays
-  anywhere with zero codec requirements.
+- **All exports render at the exact canvas resolution you chose** — animated
+  exports rebuild the scene at that resolution (1:1, same geometry math as the
+  preview) and capture exactly one seamless animation loop (the exporter solves
+  frame delay × count against the true loop period).
+- **PNG** — full-resolution still, lossless.
+- **GIF (looping)** — encoded entirely in the browser from the GIF89a spec:
+  one global 256-color palette (median-cut across sample frames, so no palette
+  flicker) with Floyd–Steinberg error-diffusion dithering, hand-written LZW,
+  NETSCAPE2.0 infinite-loop extension. Plays on literally anything.
+- **APNG (lossless)** — animated PNG written from the PNG/APNG spec: truecolor
+  RGBA with adaptive per-row PNG filtering (None/Sub/Up/Average/Paeth) and
+  DEFLATE (native CompressionStream, with a hand-written zlib stored-blocks
+  fallback). **Pixel-perfect**: decoded frames match the rendered canvas
+  exactly — verified byte-for-byte in QA. Plays in all modern browsers, macOS
+  previews, Telegram/Discord, and most image viewers.
 - Tile budgets keep previews responsive; oversized requests are coarsened
   automatically with a status note.
 
 ### Persistence
-Settings (family, variant, colors, effects, animation…) persist in `localStorage`
-with safe migration from v1 saves (legacy numeric palette indexes keep working).
-Custom palettes live in `ew-custom-palettes-v1`, gradients in `ew-gradients-v1`,
-both with stable IDs and defensive parsing.
+Settings (family, variant, color theme, effects, animation…) persist in
+`localStorage` with safe migration from older saves (legacy color modes and
+numeric palette indexes keep working). Custom palettes live in
+`ew-custom-palettes-v1`, gradients in `ew-gradients-v1`, both with stable IDs
+and defensive parsing.
 
 ## Quick start
 
@@ -98,16 +119,19 @@ No build step, no server, no dependencies.
 ### Generate a wallpaper
 
 1. Pick a **tiling family** and **pattern variant**.
-2. Choose colors: palette or gradient, color mode, background.
+2. Open **Color theme** and pick a mode — Single, Palette, Gradient or Duotone —
+   only that mode's options are shown.
 3. Optionally add visual effects and an animation.
-4. Click **⬇ PNG (full res)** for a still, or **⏺ Record WebM** for a live wallpaper.
+4. Click **⬇ PNG** for a still, or **GIF (looping)** / **APNG (lossless)** for a
+   live wallpaper at the chosen canvas resolution.
 
 ### Live wallpapers
 
 | Platform | How |
 |----------|-----|
-| **Windows** | [Lively Wallpaper](https://www.rocksdanister.com/lively) (free, open source): *Add Wallpaper* → paste this page's URL to run the interactive web version, or drag in the exported `.webm` as a video wallpaper. Wallpaper Engine also works. |
-| **Android** | Use any "video live wallpaper" app and pick the exported `.webm` (convert with `ffmpeg -i in.webm out.mp4` if needed). |
+| **Windows** | [Lively Wallpaper](https://www.rocksdanister.com/lively) (free, open source): *Add Wallpaper* → paste this page's URL to run the interactive web version, or drag in the exported GIF/APNG as a video wallpaper. Wallpaper Engine also works. |
+| **Android** | Set the exported GIF/APNG with any “video live wallpaper” app, or use Wallpaper Engine. |
+| **macOS** | APNG animates right in Finder/Preview; animated wallpaper tools accept GIF/APNG directly. |
 | **Any OS** | Set the page as your browser's startup/new-tab page. |
 
 ## Project layout
@@ -124,7 +148,9 @@ js/custom-palettes.js custom palette store + theme import/export
 js/effects.js         post-processing pipeline (blur/glow/shadow/grain/vignette)
 js/gif.js             dependency-free animated GIF89a encoder (median-cut
                       palette, Floyd-Steinberg dithering, LZW, loop extension)
-js/app.js             UI wiring, settings + migration
+js/apng.js            dependency-free lossless APNG encoder (CRC32 chunks,
+                      adaptive PNG filtering, DEFLATE + stored fallback)
+js/app.js             UI wiring, color theme system, settings + migration
 tests/                geometry + unit verification (see below)
 ```
 
@@ -143,12 +169,20 @@ bun tests/test-palettes.js
 
 # GIF encoder tests (structure walk + LZW round-trip via an independent decoder)
 bun tests/test-gif.js
+
+# APNG encoder tests (chunk/CRC walk, filter round-trip, lossless verification)
+bun tests/test-apng.js
+
+# color theme system tests (map modes, LUT builders, duotone, bands)
+bun tests/test-theme.js
 ```
 
 `scripts/qa_studio.py` (development machine only; needs Playwright) drives the real
-UI in headless Chromium: loads the app, renders every family, edits palettes and
-gradients, applies effects, checks animation frames, and exercises PNG/GIF/WebM
-export.
+UI in headless Chromium: loads the app, renders every family, switches color theme
+modes, edits palettes and gradients, applies effects, checks animation frames, and
+exercises PNG/GIF/APNG export at the chosen canvas resolution. `scripts/qa_apng.py`
+additionally proves the APNG export is pixel-perfect by comparing the decoded file
+byte-for-byte against an in-page reference render.
 
 ## Credits
 

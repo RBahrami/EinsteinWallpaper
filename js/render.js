@@ -19,8 +19,8 @@
  * margin), converted to screen space once per scene build, then filled.
  *
  * Animations: none | shimmer | flow (Gradient Flow) | glowwave (Glow Wave).
- * All of them run through Effects.compose so preview, PNG export and WebM
- * recording render identically.
+ * All of them run through Effects.compose so preview and every export
+ * format render identically.
  */
 (function (root) {
   'use strict';
@@ -329,15 +329,23 @@
   /* ------------------------------------------------------- coloring */
 
   /*
-   * Assign each tile a LUT index (0..255). Modes for hat: supertile |
-   * orientation | mirror | gradient | random | solid. Modes for periodic
-   * families: kind | orientation | gradient | random | solid.
+   * Assign each tile a LUT index (0..255). params.colorMap decides how the
+   * per-tile position value t (0..1) is derived:
+   *   single      — every tile t=0 (solid fill via a constant LUT)
+   *   supertile   — hat patch classes (hat scenes)
+   *   kind        — tile kind index (poly scenes)
+   *   orientation — orientation bucket (hat + poly)
+   *   mirror      — hat mirror split (hat scenes)
+   *   checker     — checkerboard parity of world-space tile centres
+   *   random      — seeded spatial hash
+   *   sweep       — continuous projection onto the sweep axis
+   *   bands       — sweep quantized into params.gradBands discrete steps
+   * ('gradient' is kept as a legacy alias of 'sweep'.)
    */
   function colorize(scene, params) {
-    const mode = params.colorMode;
+    const map = params.colorMap || 'supertile';
     const pal = PAL.get(params.paletteRef || 0);
     const nC = (pal && pal.colors && pal.colors.length) || 6;
-    const rr = rng(params.seed || 1);
     const theta = (params.rotation || 0) * Math.PI / 180;
 
     const stride = (() => {
@@ -349,18 +357,33 @@
     const n = isHat ? scene.hats.length : scene.tiles.length;
     const lutIdx = new Uint8Array(n);
 
-    // bbox of tile centres for the positional gradient
+    // bbox of tile centres for the positional maps
+    const positional = map === 'sweep' || map === 'gradient' || map === 'bands' || map === 'checker';
     let bb = null;
-    if (mode === 'gradient') {
+    if (positional) {
       bb = isHat ? (scene._bb || (scene._bb = clusterBBox(scene.hats))) : centroidBBox(scene.tiles);
     }
     const gx = Math.cos(theta + Math.PI / 6), gy = Math.sin(theta + Math.PI / 6);
+    const bands = Math.max(2, Math.min(24, params.gradBands || 5));
+    // world-space cell for the checkerboard (hat edge ~ tile pitch)
+    const cell = isHat ? (scene.hatEdge || 1) : 1;
+
+    const sweepT = (x, y) => {
+      const proj = (x - bb.x0) * gx + (y - bb.y0) * gy;
+      const len = Math.abs(bb.w * gx) + Math.abs(bb.h * gy) || 1;
+      return Math.min(1, Math.max(0, proj / len));
+    };
+    const checkerT = (x, y) => {
+      const kx = Math.floor((x - bb.x0) / cell), ky = Math.floor((y - bb.y0) / cell);
+      return (((kx + ky) % 2) + 2) % 2 ? 0.85 : 0.08;
+    };
 
     for (let i = 0; i < n; i++) {
       let t;
       if (isHat) {
         const hat = scene.hats[i];
-        switch (mode) {
+        switch (map) {
+          case 'single': t = 0; break;
           case 'supertile': t = (hat.cls * stride) % nC / nC; break;
           case 'orientation': {
             const ang = Math.atan2(hat.T[1], hat.T[0]);
@@ -369,26 +392,21 @@
             break;
           }
           case 'mirror': t = hat.mirror ? 0.72 : 0.08; break;
-          case 'gradient': {
-            const proj = (hat.x - bb.x0) * gx + (hat.y - bb.y0) * gy;
-            const len = Math.abs(bb.w * gx) + Math.abs(bb.h * gy) || 1;
-            t = Math.min(1, Math.max(0, proj / len));
-            break;
-          }
+          case 'sweep': case 'gradient': t = sweepT(hat.x, hat.y); break;
+          case 'bands': t = Math.min(1, Math.floor(sweepT(hat.x, hat.y) * bands) / (bands - 1)); break;
+          case 'checker': t = checkerT(hat.x, hat.y); break;
           case 'random': t = hash2(Math.round(hat.x * 8), Math.round(hat.y * 8), params.seed || 1); break;
           default: t = 0.16;
         }
       } else {
         const tile = scene.tiles[i];
-        switch (mode) {
+        switch (map) {
+          case 'single': t = 0; break;
           case 'kind': t = ((tile.k * stride) % nC) / nC; break;
           case 'orientation': t = ((tile.o * stride) % nC) / nC; break;
-          case 'gradient': {
-            const proj = (tile.cx - bb.x0) * gx + (tile.cy - bb.y0) * gy;
-            const len = Math.abs(bb.w * gx) + Math.abs(bb.h * gy) || 1;
-            t = Math.min(1, Math.max(0, proj / len));
-            break;
-          }
+          case 'sweep': case 'gradient': t = sweepT(tile.cx, tile.cy); break;
+          case 'bands': t = Math.min(1, Math.floor(sweepT(tile.cx, tile.cy) * bands) / (bands - 1)); break;
+          case 'checker': t = checkerT(tile.cx, tile.cy); break;
           case 'random': t = hash2(Math.round(tile.cx * 8), Math.round(tile.cy * 8), params.seed || 1); break;
           default: t = 0.16;
         }
@@ -406,6 +424,12 @@
       if (t.cy < y0) y0 = t.cy; if (t.cy > y1) y1 = t.cy;
     }
     return { x0, y0, x1, y1, w: x1 - x0, h: y1 - y0 };
+  }
+
+  // 256-entry constant LUT (Single color theme mode; shimmer shades it)
+  function buildSolidLut(hex) {
+    const col = (typeof hex === 'string' && /^#[0-9a-f]{6}$/i.test(hex)) ? hex : '#888888';
+    return new Array(256).fill(col);
   }
 
   // 256-entry color LUT. source: palette ref -> cycling palette interpolation
@@ -641,7 +665,7 @@
   /* ----------------------------------------------------- export API */
 
   root.Renderer = {
-    buildScene, colorize, buildLut, buildShimLuts,
+    buildScene, colorize, buildLut, buildSolidLut, buildShimLuts,
     paintTiles, paintScene, makeAnimator,
     rng, hash2, shrunkHatOutline, shrunkPoly, clusterBBox,
   };
