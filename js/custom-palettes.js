@@ -108,17 +108,19 @@
       return customs.length;
     },
     validate,
-    /* export combined theme file (palettes + gradients) */
-    exportJSON(palettes, gradients) {
-      return JSON.stringify({
+    /* export combined theme file (palettes + gradients + extra template kinds) */
+    exportJSON(palettes, gradients, extras) {
+      const out = {
         type: 'einstein-wallpaper-themes',
         version: 1,
         exported: new Date().toISOString(),
         palettes: palettes || this.list(),
         gradients: gradients || (root.Gradients ? root.Gradients.list() : []),
-      }, null, 2);
+      };
+      if (extras) out.extras = extras; // { single: ['#hex'], duo: [{a,b}] }
+      return JSON.stringify(out, null, 2);
     },
-    /* import + validate; returns {palettes, gradients} counts, throws on malformed file */
+    /* import + validate; returns {palettes, gradients, extras?}, throws on malformed file */
     importJSON(text) {
       let data;
       try { data = JSON.parse(text); } catch (e) { throw new Error('Not a valid JSON file'); }
@@ -127,12 +129,18 @@
       }
       const palettes = Array.isArray(data.palettes) ? data.palettes : [];
       const gradients = Array.isArray(data.gradients) ? data.gradients : [];
+      const extras = (data.extras && typeof data.extras === 'object') ? {
+        single: Array.isArray(data.extras.single) ? data.extras.single : [],
+        duo: Array.isArray(data.extras.duo) ? data.extras.duo : [],
+      } : null;
       const okP = palettes.filter(validate);
       const okG = gradients.filter((g) => GR.validate(g));
-      if (!okP.length && !okG.length) throw new Error('No valid palettes or gradients in file');
+      if (!okP.length && !okG.length && !(extras && (extras.single.length || extras.duo.length))) {
+        throw new Error('No valid palettes, gradients or templates in file');
+      }
       const nP = okP.length ? this.replaceAll(okP) : 0;
       const nG = okG.length ? GR.replaceAll(okG) : 0;
-      return { palettes: nP, gradients: nG };
+      return { palettes: nP, gradients: nG, extras };
     },
     MAX_COLORS,
   };

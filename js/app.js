@@ -1,5 +1,12 @@
 /*
  * app.js — UI wiring for EinsteinWallpaper (Geometric Wallpaper Studio).
+ *
+ * Color theme: one section, four modes (Single / Palette / Gradient /
+ * Duotone). Each mode owns dedicated settings — arrangement, template
+ * library, inline editor — shown only while that mode is active. Every
+ * control recolors the wallpaper live; templates can be customized and
+ * saved/loaded per mode. Foreground opacity fades tiles+outlines over the
+ * background in the preview and in every export format.
  */
 (function () {
   'use strict';
@@ -62,6 +69,17 @@
     single: 'Uniform',
   };
 
+  // built-in single-color templates
+  const SINGLE_TPLS = [
+    '#5bc8ff', '#8f7bff', '#ff8bd2', '#ffe14d', '#6be3a2', '#ff8a5b',
+    '#f4777f', '#4dffb8', '#e8e8e8', '#9aa0b0', '#4a5a78', '#222639',
+  ];
+  // built-in duotone templates [A, B]
+  const DUO_TPLS = [
+    ['#5bc8ff', '#f4777f'], ['#ffe14d', '#b07bff'], ['#6be3a2', '#ff8a5b'],
+    ['#ff8bd2', '#4dffb8'], ['#f4f1ea', '#54718f'], ['#ffd9a0', '#4a1c3d'],
+  ];
+
   const FX_DEFAULTS = {
     blur: 0, glow: 0, glowRadius: 14,
     shadow: 0, shadowSoft: 14, shadowOff: 8,
@@ -78,6 +96,7 @@
     singleColor: '#5bc8ff', duoA: '#5bc8ff', duoB: '#f4777f',
     paletteRef: { kind: 'builtin', index: 0 },
     gradientId: null, bgSource: 'theme', bgColor: '#0b1020',
+    fgAlpha: 100,
     lineAuto: true, lineColor: '#101014',
     animation: 'shimmer', animSpeed: 1, flowAngle: 30,
     effects: { ...FX_DEFAULTS },
@@ -119,6 +138,8 @@
         if (!GR.isHexColor(p.duoB)) p.duoB = DEFAULTS.duoB;
         if (!GR.isHexColor(p.bgColor)) p.bgColor = DEFAULTS.bgColor;
         p.gradBands = Math.max(2, Math.min(12, +p.gradBands || 5));
+        p.fgAlpha = (s.fgAlpha == null || isNaN(+s.fgAlpha))
+          ? 100 : Math.max(0, Math.min(100, Math.round(+s.fgAlpha)));
         if (!TL.isFamily(p.family)) p.family = 'hat';
         if (p.family === 'hat' && !['H', 'P', 'F'].includes(p.variant)) p.variant = 'H';
         p.effects = Object.assign({}, FX_DEFAULTS, s.effects || {});
@@ -137,6 +158,28 @@
 
   // custom palette resolver for Palettes.get
   PAL.setCustomResolver((id) => CP.find(id));
+
+  // generic template store (Single colors, Duotone pairs) — localStorage
+  function tplStore(key) {
+    let items = [];
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw) {
+        const data = JSON.parse(raw);
+        if (Array.isArray(data)) items = data;
+      }
+    } catch (e) { /* ignore */ }
+    const persist = () => {
+      try { localStorage.setItem(key, JSON.stringify(items)); } catch (e) { /* ignore */ }
+    };
+    return {
+      list: () => items.slice(),
+      add(tpl) { items.push(tpl); persist(); },
+      remove(i) { if (i >= 0 && i < items.length) { items.splice(i, 1); persist(); } },
+    };
+  }
+  const singleStore = tplStore('ew-single-templates-v1');
+  const duoStore = tplStore('ew-duo-templates-v1');
 
   function naturalOrientation(a) { return a.r >= 1 ? 'landscape' : 'portrait'; }
   function currentAspect() {
@@ -159,22 +202,33 @@
 
   /* ------------------------------------------- color theme helpers */
 
-  // arrangement options available for the active theme mode + family
-  function arrOptions() {
+  // arrangement options available for a theme mode + family. Options that
+  // would be mathematically constant on the current family (By tile kind /
+  // By orientation on families with a single kind/orientation) are hidden —
+  // the engine's degenerate-map guard covers any stale-scene race.
+  function arrOptions(mode) {
     const fam = currentFamily();
     const kind = fam.id === 'hat' ? 'hat' : (fam.id === 'lines' ? 'line' : 'poly');
-    if (P.themeMode === 'palette') {
+    const counts = (scene && scene.kind === 'poly' && scene.family === P.family) ? scene : null;
+    const m = mode || P.themeMode;
+    if (m === 'palette') {
       if (kind === 'hat') return ['supertile', 'orientation', 'mirror', 'checker', 'random'];
-      if (kind === 'poly') return ['kind', 'orientation', 'checker', 'random'];
+      if (kind === 'poly') {
+        const opts = [];
+        if (!counts || counts.kindCount >= 2) opts.push('kind');
+        if (!counts || counts.orientCount >= 2) opts.push('orientation');
+        opts.push('checker', 'random');
+        return opts;
+      }
       return ['orientation', 'random'];
     }
-    if (P.themeMode === 'gradient') return ['sweep', 'bands', 'random'];
-    if (P.themeMode === 'duotone') return ['checker', 'sweep', 'random'];
+    if (m === 'gradient') return ['sweep', 'bands', 'random'];
+    if (m === 'duotone') return ['checker', 'sweep', 'random'];
     return ['single'];
   }
-  function mapKey() {
-    return P.themeMode === 'palette' ? 'colorMap'
-      : P.themeMode === 'gradient' ? 'gradMap' : 'duoMap';
+  function mapKeyFor(mode) {
+    return mode === 'palette' ? 'colorMap'
+      : mode === 'gradient' ? 'gradMap' : 'duoMap';
   }
   // the colorMap value colorize() should use for the active theme mode
   function currentMap() {
@@ -185,8 +239,9 @@
   }
   function ensureMapValid() {
     if (P.themeMode === 'single') return;
-    const opts = arrOptions();
-    if (!opts.includes(P[mapKey()])) P[mapKey()] = opts[0];
+    const key = mapKeyFor(P.themeMode);
+    const opts = arrOptions(P.themeMode);
+    if (!opts.includes(P[key])) P[key] = opts[0];
   }
   function setThemeMode(mode) {
     if (!THEME_MODE_IDS.includes(mode)) mode = 'palette';
@@ -282,14 +337,20 @@
     }
   }
 
-  /* ------------------------------------------- palette grid */
+  /* --------------------------------------- palette templates grid */
+
+  function currentPaletteSource() {
+    // the palette the mode panel works on: the live draft, or the selected ref
+    if (palDraftActive) return palDraft;
+    return PAL.get(P.paletteRef);
+  }
 
   function buildPaletteGrid() {
     const grid = $('paletteGrid');
     grid.innerHTML = '';
     const nameEl = $('palName');
     const pal = PAL.get(P.paletteRef);
-    if (nameEl) nameEl.textContent = pal.name;
+    if (nameEl) nameEl.textContent = (palDraftActive ? 'edited · ' : '') + pal.name;
     PAL.LIST.forEach((palB, i) => {
       grid.appendChild(makeSwatch(palB, { kind: 'builtin', index: i }));
     });
@@ -309,47 +370,28 @@
     b.title = pal.name + (ref.kind === 'custom' ? ' (custom)' : '');
     b.style.background = `linear-gradient(135deg, ${pal.colors.join(',')})`;
     b.style.borderColor = on ? '#fff' : 'rgba(255,255,255,.15)';
-    b.onclick = () => { P.paletteRef = ref; buildPaletteGrid(); syncPalEditorSelect(); recolor(false); save(); };
+    b.onclick = () => applyPaletteRef(ref);
     return b;
   }
-
-  /* --------------------------------------------- palette editor */
-
-  let palEditRef = { kind: 'builtin', index: 0 };
-  let palEditDraft = null; // working copy {name, colors, bg, outline}
-
-  function palEditSource() {
-    if (palEditRef.kind === 'custom') return CP.find(palEditRef.id);
-    return PAL.LIST[palEditRef.index] || PAL.LIST[0];
+  function applyPaletteRef(ref) {
+    P.paletteRef = ref;
+    palDraftActive = false;
+    loadPalDraft();
+    buildPaletteGrid();
+    renderPalEditor();
+    recolor(false); save();
   }
-  function syncPalEditorSelect() {
-    const sel = $('palEditSelect');
-    sel.innerHTML = '';
-    const g1 = document.createElement('optgroup');
-    g1.label = 'Built-in';
-    PAL.LIST.forEach((p, i) => {
-      const o = document.createElement('option');
-      o.value = 'bi:' + i; o.textContent = p.name;
-      if (palEditRef.kind === 'builtin' && palEditRef.index === i) o.selected = true;
-      g1.appendChild(o);
-    });
-    sel.appendChild(g1);
-    const customs = CP.list();
-    if (customs.length) {
-      const g2 = document.createElement('optgroup');
-      g2.label = 'Custom';
-      for (const p of customs) {
-        const o = document.createElement('option');
-        o.value = 'cu:' + p.id; o.textContent = p.name;
-        if (palEditRef.kind === 'custom' && palEditRef.id === p.id) o.selected = true;
-        g2.appendChild(o);
-      }
-      sel.appendChild(g2);
-    }
-  }
+
+  /* -------------------------------------- palette editor (inline) */
+
+  let palDraftActive = false;         // true while unsaved edits are applied
+  let palDraft = null;                // {name, colors[], bg, outline}
+
   function loadPalDraft() {
-    const src = palEditSource();
-    palEditDraft = {
+    let src;
+    if (P.paletteRef.kind === 'custom') src = CP.find(P.paletteRef.id) || PAL.LIST[0];
+    else src = PAL.LIST[P.paletteRef.index] || PAL.LIST[0];
+    palDraft = {
       name: src.name,
       colors: [...src.colors],
       bg: src.bg || '#0b1020',
@@ -357,68 +399,83 @@
     };
   }
   function renderPalEditor() {
-    const src = palEditSource();
-    $('palEditName').value = palEditDraft.name;
-    $('palEditBg').value = palEditDraft.bg;
-    $('palEditOutline').value = palEditDraft.outline || PAL.autoLineColor(palEditDraft.bg);
-    $('palEditOutline').disabled = palEditDraft.outline == null;
-    $('palEditCount').textContent = palEditDraft.colors.length + ' colors';
-    const list = $('palEditColors');
+    const list = $('palStops');
     list.innerHTML = '';
-    palEditDraft.colors.forEach((c, i) => {
+    palDraft.colors.forEach((c, i) => {
       const row = document.createElement('div');
       row.className = 'stoprow';
       const col = document.createElement('input');
       col.type = 'color'; col.value = c;
-      col.oninput = () => { palEditDraft.colors[i] = col.value; renderPalPreview(); };
+      col.oninput = () => {
+        palDraft.colors[i] = col.value; palDraftActive = true;
+        $('palEditState').textContent = 'edited · live';
+        buildPaletteGrid(); renderPalPreviewStrip(); recolor(false); save();
+      };
       const hex = document.createElement('input');
       hex.type = 'text'; hex.value = c; hex.className = 'hextext'; hex.spellcheck = false;
       hex.onchange = () => {
-        if (GR.isHexColor(hex.value)) { palEditDraft.colors[i] = GR.normHex(hex.value); renderPalEditor(); }
-        else hex.value = palEditDraft.colors[i];
+        if (GR.isHexColor(hex.value)) {
+          palDraft.colors[i] = GR.normHex(hex.value); palDraftActive = true;
+          $('palEditState').textContent = 'edited · live';
+          buildPaletteGrid(); renderPalEditor(); recolor(false); save();
+        } else hex.value = palDraft.colors[i];
       };
       const up = document.createElement('button');
       up.className = 'mini-btn'; up.textContent = '↑'; up.title = 'Move up';
-      up.onclick = () => { if (i > 0) { [palEditDraft.colors[i - 1], palEditDraft.colors[i]] = [palEditDraft.colors[i], palEditDraft.colors[i - 1]]; renderPalEditor(); } };
+      up.onclick = () => {
+        if (i > 0) {
+          [palDraft.colors[i - 1], palDraft.colors[i]] = [palDraft.colors[i], palDraft.colors[i - 1]];
+          palDraftActive = true; buildPaletteGrid(); renderPalEditor(); recolor(false); save();
+        }
+      };
       const down = document.createElement('button');
       down.className = 'mini-btn'; down.textContent = '↓'; down.title = 'Move down';
-      down.onclick = () => { if (i < palEditDraft.colors.length - 1) { [palEditDraft.colors[i + 1], palEditDraft.colors[i]] = [palEditDraft.colors[i], palEditDraft.colors[i + 1]]; renderPalEditor(); } };
+      down.onclick = () => {
+        if (i < palDraft.colors.length - 1) {
+          [palDraft.colors[i + 1], palDraft.colors[i]] = [palDraft.colors[i], palDraft.colors[i + 1]];
+          palDraftActive = true; buildPaletteGrid(); renderPalEditor(); recolor(false); save();
+        }
+      };
       const del = document.createElement('button');
       del.className = 'mini-btn'; del.textContent = '×'; del.title = 'Remove color';
-      del.onclick = () => { if (palEditDraft.colors.length > 1) { palEditDraft.colors.splice(i, 1); renderPalEditor(); } };
+      del.onclick = () => {
+        if (palDraft.colors.length > 1) {
+          palDraft.colors.splice(i, 1);
+          palDraftActive = true; buildPaletteGrid(); renderPalEditor(); recolor(false); save();
+        }
+      };
       row.append(col, hex, up, down, del);
       list.appendChild(row);
     });
-    $('palDelete').disabled = palEditRef.kind !== 'custom';
-    renderPalPreview();
+    $('palBg').value = palDraft.bg;
+    $('palOutline').value = palDraft.outline || PAL.autoLineColor(palDraft.bg);
+    $('palOutline').disabled = palDraft.outline == null;
+    renderPalPreviewStrip();
   }
-  function renderPalPreview() {
-    const el = $('palEditPreview');
-    el.style.background = `linear-gradient(90deg, ${palEditDraft.colors.join(',')})`;
-    el.style.borderBottom = `4px solid ${palEditDraft.outline || PAL.autoLineColor(palEditDraft.bg)}`;
-    el.style.backgroundBlendMode = 'normal';
-    el.style.boxShadow = `inset 0 -100px 0 -98px ${palEditDraft.bg}`;
-  }
-  function syncPalEditorAll() {
-    syncPalEditorSelect();
-    loadPalDraft();
-    renderPalEditor();
+  function renderPalPreviewStrip() {
+    // no separate preview canvas: the wallpaper IS the preview
   }
 
-  /* --------------------------------------------- gradient editor */
+  /* ------------------------------------- gradient editor (inline) */
 
-  let gradEditId = null;   // selected gradient id (builtin or custom)
-  let gradDraft = null;    // working normalized copy
+  let gradDraftActive = false;   // true while unsaved gradient edits apply
+  let gradDraft = null;          // working normalized copy
+  let gradEditId = null;         // template the draft started from
 
-  function syncGradSelect() {
-    const sel = $('gradSelect');
+  function loadGradDraft() {
+    const src = GR.find(P.gradientId) || GR.BUILTINS[0];
+    gradDraft = GR.normalize(JSON.parse(JSON.stringify(src)));
+    gradEditId = src.id;
+  }
+  function buildGradPick() {
+    const sel = $('gradPick');
     sel.innerHTML = '';
     const g1 = document.createElement('optgroup');
     g1.label = 'Built-in';
     GR.BUILTINS.forEach((g) => {
       const o = document.createElement('option');
       o.value = g.id; o.textContent = g.name;
-      if (gradEditId === g.id) o.selected = true;
+      if (P.gradientId === g.id) o.selected = true;
       g1.appendChild(o);
     });
     sel.appendChild(g1);
@@ -429,16 +486,26 @@
       for (const g of customs) {
         const o = document.createElement('option');
         o.value = g.id; o.textContent = g.name;
-        if (gradEditId === g.id) o.selected = true;
+        if (P.gradientId === g.id) o.selected = true;
         g2.appendChild(o);
       }
       sel.appendChild(g2);
     }
   }
-  function loadGradDraft() {
-    const src = GR.find(gradEditId) || GR.BUILTINS[0];
-    gradDraft = GR.normalize(JSON.parse(JSON.stringify(src)));
-    gradEditId = src.id;
+  function applyGradientId(id) {
+    P.gradientId = id;
+    gradDraftActive = false;
+    loadGradDraft();
+    buildGradPick();
+    renderGradEditor();
+    syncGradEditState();
+    recolor(false); save();
+  }
+  function gradSource() {
+    return gradDraftActive ? gradDraft : GR.normalize(currentGradient());
+  }
+  function syncGradEditState() {
+    $('gradEditState').textContent = gradDraftActive ? 'edited · live' : '';
   }
   function renderGradEditor() {
     fillSelect($('gradType'), [['linear', 'Linear'], ['radial', 'Radial'], ['conic', 'Conic']], gradDraft.type);
@@ -452,7 +519,11 @@
       row.className = 'stoprow';
       const col = document.createElement('input');
       col.type = 'color'; col.value = s.color;
-      col.oninput = () => { gradDraft.stops[i].color = col.value; renderGradPreview(); };
+      col.oninput = () => {
+        gradDraft.stops[i].color = col.value;
+        gradDraftActive = true; syncGradEditState();
+        renderGradPreview(); recolor(false); save();
+      };
       const pos = document.createElement('input');
       pos.type = 'number'; pos.min = 0; pos.max = 100; pos.step = 1;
       pos.value = Math.round(s.pos * 100);
@@ -460,12 +531,17 @@
       pos.onchange = () => {
         gradDraft.stops[i].pos = Math.max(0, Math.min(100, +pos.value || 0)) / 100;
         gradDraft.stops.sort((a, b) => a.pos - b.pos);
-        renderGradEditor();
+        gradDraftActive = true; syncGradEditState();
+        renderGradEditor(); recolor(false); save();
       };
       const del = document.createElement('button');
       del.className = 'mini-btn'; del.textContent = '×'; del.title = 'Remove stop';
       del.onclick = () => {
-        if (gradDraft.stops.length > 2) { gradDraft.stops.splice(i, 1); renderGradEditor(); }
+        if (gradDraft.stops.length > 2) {
+          gradDraft.stops.splice(i, 1);
+          gradDraftActive = true; syncGradEditState();
+          renderGradEditor(); recolor(false); save();
+        }
       };
       row.append(col, pos, del);
       list.appendChild(row);
@@ -483,10 +559,63 @@
     if (g && g.conic) GR.fillConic(ctx, gradDraft, cv.width, cv.height);
     else { ctx.fillStyle = g; ctx.fillRect(0, 0, cv.width, cv.height); }
   }
-  function syncGradEditorAll() {
-    syncGradSelect();
-    loadGradDraft();
-    renderGradEditor();
+
+  /* ------------------------------- single / duotone templates */
+
+  function buildSingleTpls() {
+    const box = $('singleTpls');
+    box.innerHTML = '';
+    SINGLE_TPLS.forEach((c) => {
+      box.appendChild(makeTplSwatch(c, c === P.singleColor, () => {
+        P.singleColor = c; $('singleColor').value = c;
+        buildSingleTpls(); recolor(false); save();
+      }));
+    });
+    const customs = singleStore.list();
+    if (customs.length) {
+      const sep = document.createElement('div');
+      sep.className = 'tpl-sep';
+      box.appendChild(sep);
+      customs.forEach((c, i) => {
+        box.appendChild(makeTplSwatch(c, c === P.singleColor, () => {
+          P.singleColor = c; $('singleColor').value = c;
+          buildSingleTpls(); recolor(false); save();
+        }, i));
+      });
+    }
+  }
+  function makeTplSwatch(bg, on, onclick, customIdx) {
+    const b = document.createElement('button');
+    b.className = 'tpl' + (on ? ' on' : '');
+    b.style.background = bg;
+    b.title = customIdx != null ? 'Custom template' : bg;
+    b.onclick = onclick;
+    return b;
+  }
+  function buildDuoTpls() {
+    const box = $('duoTpls');
+    box.innerHTML = '';
+    const pairOn = (a, b) => a === P.duoA && b === P.duoB;
+    DUO_TPLS.forEach(([a, b]) => {
+      box.appendChild(makeTplSwatch(`linear-gradient(135deg, ${a} 50%, ${b} 50%)`, pairOn(a, b), () => {
+        P.duoA = a; P.duoB = b;
+        $('duoA').value = a; $('duoB').value = b;
+        buildDuoTpls(); recolor(false); save();
+      }));
+    });
+    const customs = duoStore.list();
+    if (customs.length) {
+      const sep = document.createElement('div');
+      sep.className = 'tpl-sep';
+      box.appendChild(sep);
+      customs.forEach((p, i) => {
+        box.appendChild(makeTplSwatch(`linear-gradient(135deg, ${p.a} 50%, ${p.b} 50%)`, pairOn(p.a, p.b), () => {
+          P.duoA = p.a; P.duoB = p.b;
+          $('duoA').value = p.a; $('duoB').value = p.b;
+          buildDuoTpls(); recolor(false); save();
+        }, i));
+      });
+    }
   }
 
   /* --------------------------------------------------- rendering */
@@ -510,13 +639,14 @@
   }
 
   function makeLook() {
-    const pal = PAL.get(P.paletteRef);
-    let lut;
-    if (P.themeMode === 'single') {
+    const mode = P.themeMode;
+    let lut, pal = null, grad = null;
+    if (mode === 'single') {
       lut = R.buildSolidLut(P.singleColor);
-    } else if (P.themeMode === 'gradient') {
-      lut = R.buildLut({ _isGradient: true, gradient: GR.normalize(currentGradient()) });
-    } else if (P.themeMode === 'duotone') {
+    } else if (mode === 'gradient') {
+      grad = gradSource();
+      lut = R.buildLut({ _isGradient: true, gradient: grad });
+    } else if (mode === 'duotone') {
       lut = R.buildLut({
         _isGradient: true,
         gradient: GR.normalize({
@@ -525,27 +655,32 @@
         }),
       });
     } else {
-      lut = R.buildLut(P.paletteRef);
+      pal = palDraftActive ? palDraft : PAL.get(P.paletteRef);
+      lut = palDraftActive ? R.buildLutFromColors(pal.colors) : R.buildLut(P.paletteRef);
     }
     // background is mode-scoped: palette -> its bg color (or custom),
     // gradient -> the gradient itself (or a solid color), single/duotone -> custom color
     let bg, bgPaint = null;
-    const bgSrc = (P.themeMode === 'palette' || P.themeMode === 'gradient') ? P.bgSource : 'custom';
-    if (P.themeMode === 'gradient' && bgSrc === 'gradient') {
-      const grad = GR.normalize(currentGradient());
+    const bgSrc = (mode === 'palette' || mode === 'gradient') ? P.bgSource : 'custom';
+    if (mode === 'gradient' && bgSrc === 'gradient') {
       bg = GR.sample(grad, 0.5);
       bgPaint = (ctx, W, H) => {
         const g = GR.toCanvas(ctx, grad, W, H, 0);
         if (g && g.conic) GR.fillConic(ctx, grad, W, H);
         else { ctx.fillStyle = g; ctx.fillRect(0, 0, W, H); }
       };
-    } else if (P.themeMode === 'palette' && bgSrc === 'theme') {
+    } else if (mode === 'palette' && bgSrc === 'theme') {
       bg = pal.bg;
     } else {
       bg = P.bgColor;
     }
-    const line = P.lineAuto ? PAL.autoLineColor(bg) : P.lineColor;
-    const look = { lut, line, bg, gap: P.gap, outlineWidth: P.outlineWidth };
+    // outline: palette's own outline (when lineAuto) -> auto -> manual
+    const palOutline = pal && pal.outline != null ? pal.outline : null;
+    const line = P.lineAuto ? (palOutline || PAL.autoLineColor(bg)) : P.lineColor;
+    const look = {
+      lut, line, bg, gap: P.gap, outlineWidth: P.outlineWidth,
+      alpha: Math.max(0, Math.min(1, (P.fgAlpha == null ? 100 : +P.fgAlpha) / 100)),
+    };
     if (bgPaint) look.bgPaint = bgPaint;
     return look;
   }
@@ -582,12 +717,12 @@
     }
     statusEl.textContent = status;
 
+    // the scene is ready: refresh family-aware arrangement options
+    syncMapSelects();
+
     // paint the static scene once (transparent bg; background comes from Effects)
     R.paintScene(sceneCtx, scene, p, look);
     composeFrame(0);
-    if (P.animation !== 'none' && !(animator && animator.overlay)) {
-      // per-tile animations loop below; overlay ones loop too
-    }
     if (P.animation !== 'none') {
       cancelAnimationFrame(animRaf);
       animRaf = requestAnimationFrame(loop);
@@ -650,7 +785,7 @@
     const sctx = offScene.getContext('2d');
     R.paintScene(sctx, sc, p, lk);
     FX.compose(off.getContext('2d'), offScene, P.resW, P.resH, lk, fxParams());
-  off.toBlob((blob) => {
+    off.toBlob((blob) => {
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
       a.download = `${famTag()}-${P.resW}x${P.resH}.png`;
@@ -811,12 +946,14 @@
     const vivid = ['#5bc8ff', '#ff8bd2', '#ffe14d', '#6be3a2', '#b07bff', '#ff8a5b', '#4dffb8', '#f4777f'];
     const tm = rr();
     P.themeMode = tm < 0.45 ? 'palette' : tm < 0.72 ? 'gradient' : tm < 0.9 ? 'duotone' : 'single';
+    // drop unsaved edits — randomize starts from templates
+    palDraftActive = false; gradDraftActive = false;
     if (P.themeMode === 'palette') {
       const nB = PAL.LIST.length, nC = CP.count();
       P.paletteRef = (nC && rr() < 0.25)
         ? { kind: 'custom', id: CP.list()[Math.floor(rr() * nC)].id }
         : { kind: 'builtin', index: Math.floor(rr() * nB) };
-      const pOpts = arrOptions();
+      const pOpts = arrOptions('palette');
       P.colorMap = pOpts[Math.floor(rr() * pOpts.length)];
       P.bgSource = rr() < 0.85 ? 'theme' : 'custom';
     } else if (P.themeMode === 'gradient') {
@@ -835,6 +972,10 @@
       P.singleColor = vivid[Math.floor(rr() * vivid.length)];
       P.bgColor = PAL.shade(P.singleColor, 0.2);
     }
+    // reload drafts so the editors show the freshly applied templates
+    palDraftActive = false; gradDraftActive = false;
+    loadPalDraft(); loadGradDraft();
+    P.fgAlpha = rr() < 0.8 ? 100 : 55 + Math.round(rr() * 40);
     P.animation = ['none', 'shimmer', 'flow', 'glowwave'][Math.floor(rr() * 4)];
     P.flowAngle = Math.floor(rr() * 24) * 15;
     P.rotation = Math.floor(rr() * 24) * 15;
@@ -877,13 +1018,15 @@
       box.appendChild(b);
     }
     ensureMapValid();
-    fillSelect($('themeMap'), arrOptions().map((m) => [m, MAP_LABELS[m] || m]), P[mapKey()]);
-    $('themeBands').value = P.gradBands;
-    $('themeBandsVal').textContent = P.gradBands;
+    syncMapSelects();
+    $('gradBands').value = P.gradBands;
+    $('gradBandsVal').textContent = P.gradBands;
     $('singleColor').value = P.singleColor;
     $('duoA').value = P.duoA;
     $('duoB').value = P.duoB;
-    fillSelect($('gradPick'), GR.all().map((g) => [g.id, g.name]), P.gradientId);
+    buildGradPick();
+    buildSingleTpls();
+    buildDuoTpls();
     const bgSel = $('bgSource');
     if (P.themeMode === 'palette') {
       fillSelect(bgSel, [['theme', 'From palette'], ['custom', 'Custom color']],
@@ -893,21 +1036,30 @@
         P.bgSource === 'theme' ? 'custom' : P.bgSource);
     }
     $('bgColor').value = P.bgColor;
+    $('fgAlpha').value = P.fgAlpha;
+    $('fgAlphaVal').textContent = P.fgAlpha + '%';
     syncThemeVisibility();
   }
 
-  // show only the options that belong to the active theme mode
+  // fill the per-mode arrangement selects from the family-aware option lists
+  function syncMapSelects() {
+    fillSelect($('palMap'), arrOptions('palette').map((m) => [m, MAP_LABELS[m] || m]), P.colorMap);
+    fillSelect($('gradMapSel'), arrOptions('gradient').map((m) => [m, MAP_LABELS[m] || m]), P.gradMap);
+    fillSelect($('duoMapSel'), arrOptions('duotone').map((m) => [m, MAP_LABELS[m] || m]), P.duoMap);
+  }
+
+  // show only the panel (and rows) that belong to the active theme mode
   function syncThemeVisibility() {
     const mode = P.themeMode;
     const show = (id, on) => { $(id).style.display = on ? '' : 'none'; };
-    show('themeMapRow', mode !== 'single');
-    show('themeBandsRow', mode === 'gradient' && P.gradMap === 'bands');
-    show('singleColorRow', mode === 'single');
-    show('duoRow', mode === 'duotone');
-    show('paletteRow', mode === 'palette');
-    show('gradientRow', mode === 'gradient');
+    show('panel-single', mode === 'single');
+    show('panel-palette', mode === 'palette');
+    show('panel-gradient', mode === 'gradient');
+    show('panel-duotone', mode === 'duotone');
+    show('gradBandsRow', mode === 'gradient' && P.gradMap === 'bands');
     show('bgSourceWrap', mode === 'palette' || mode === 'gradient');
     show('bgColorWrap', mode === 'single' || mode === 'duotone' || P.bgSource === 'custom');
+    show('bgRow', !(mode === 'palette' && P.bgSource === 'theme'));
   }
   function syncFamilyVisibility() {
     const isLine = P.family === 'lines';
@@ -954,8 +1106,10 @@
     orBtns.forEach((b) => b.classList.toggle('on', b.dataset.orient === P.orientation));
     syncAnimVisibility();
     syncFamilyVisibility();
-    syncPalEditorAll();
-    syncGradEditorAll();
+    renderPalEditor();
+    renderGradEditor();
+    syncGradEditState();
+    $('palEditState').textContent = palDraftActive ? 'edited · live' : '';
   }
 
   /* ------------------------------------------------------- bind */
@@ -991,24 +1145,198 @@
     $('seed').oninput = (e) => { P.seed = +e.target.value || 1; $('seedVal').textContent = '#' + P.seed; refresh(); save(); };
     $('animSelect').onchange = (e) => { P.animation = e.target.value; syncAnimVisibility(); refresh(); save(); };
     $('variantSelect').onchange = (e) => { P.variant = e.target.value; refresh(); save(); };
-    // color theme
-    $('themeMap').onchange = (e) => { P[mapKey()] = e.target.value; recolor(true); save(); };
-    $('themeBands').oninput = (e) => { P.gradBands = Math.max(2, Math.min(12, +e.target.value || 5)); $('themeBandsVal').textContent = P.gradBands; recolor(true); save(); };
-    $('singleColor').oninput = (e) => { P.singleColor = e.target.value; recolor(false); save(); };
-    $('duoA').oninput = (e) => { P.duoA = e.target.value; recolor(false); save(); };
-    $('duoB').oninput = (e) => { P.duoB = e.target.value; recolor(false); save(); };
-    $('gradPick').onchange = (e) => {
-      P.gradientId = e.target.value;
-      gradEditId = P.gradientId;
-      syncGradEditorAll();
-      recolor(false); save();
-    };
+
+    // ---- color theme: per-mode arrangements ----
+    $('palMap').onchange = (e) => { P.colorMap = e.target.value; recolor(true); save(); };
+    $('gradMapSel').onchange = (e) => { P.gradMap = e.target.value; syncThemeVisibility(); recolor(true); save(); };
+    $('duoMapSel').onchange = (e) => { P.duoMap = e.target.value; recolor(true); save(); };
+    $('gradBands').oninput = (e) => { P.gradBands = Math.max(2, Math.min(12, +e.target.value || 5)); $('gradBandsVal').textContent = P.gradBands; recolor(true); save(); };
+    $('singleColor').oninput = (e) => { P.singleColor = e.target.value; buildSingleTpls(); recolor(false); save(); };
+    $('duoA').oninput = (e) => { P.duoA = e.target.value; buildDuoTpls(); recolor(false); save(); };
+    $('duoB').oninput = (e) => { P.duoB = e.target.value; buildDuoTpls(); recolor(false); save(); };
+    $('gradPick').onchange = (e) => applyGradientId(e.target.value);
     $('bgSource').onchange = (e) => { P.bgSource = e.target.value; syncThemeVisibility(); recolor(false); save(); };
     $('bgColor').oninput = (e) => { P.bgColor = e.target.value; recolor(false); save(); };
+    $('fgAlpha').oninput = (e) => {
+      P.fgAlpha = Math.max(0, Math.min(100, +e.target.value || 0));
+      $('fgAlphaVal').textContent = P.fgAlpha + '%';
+      recolor(false); save();
+    };
     $('lineAuto').onchange = (e) => { P.lineAuto = e.target.checked; $('lineColor').disabled = P.lineAuto; recolor(false); save(); };
     $('lineColor').oninput = (e) => { P.lineColor = e.target.value; recolor(false); save(); };
 
-    // effects
+    // ---- single / duotone template save/delete ----
+    $('singleTplSave').onclick = () => {
+      if (!singleStore.list().includes(P.singleColor)) {
+        singleStore.add(P.singleColor);
+        buildSingleTpls();
+        statusEl.textContent = 'single-color template saved';
+      } else statusEl.textContent = 'already saved';
+    };
+    $('singleTplDelete').onclick = () => {
+      const i = singleStore.list().indexOf(P.singleColor);
+      if (i >= 0) { singleStore.remove(i); buildSingleTpls(); statusEl.textContent = 'template deleted'; }
+      else statusEl.textContent = 'select a custom template first';
+    };
+    $('duoTplSave').onclick = () => {
+      const list = duoStore.list();
+      if (!list.some((p) => p.a === P.duoA && p.b === P.duoB)) {
+        duoStore.add({ a: P.duoA, b: P.duoB });
+        buildDuoTpls();
+        statusEl.textContent = 'duotone template saved';
+      } else statusEl.textContent = 'already saved';
+    };
+    $('duoTplDelete').onclick = () => {
+      const list = duoStore.list();
+      const i = list.findIndex((p) => p.a === P.duoA && p.b === P.duoB);
+      if (i >= 0) { duoStore.remove(i); buildDuoTpls(); statusEl.textContent = 'template deleted'; }
+      else statusEl.textContent = 'select a custom template first';
+    };
+
+    // ---- palette editor (inline in Palette mode) ----
+    $('palAddColor').onclick = () => {
+      if (palDraft.colors.length < CP.MAX_COLORS) {
+        palDraft.colors.push('#88aacc');
+        palDraftActive = true;
+        $('palEditState').textContent = 'edited · live';
+        buildPaletteGrid(); renderPalEditor(); recolor(false); save();
+      }
+    };
+    $('palDraftReset').onclick = () => {
+      palDraftActive = false;
+      loadPalDraft();
+      $('palEditState').textContent = '';
+      buildPaletteGrid(); renderPalEditor(); recolor(false); save();
+    };
+    $('palBg').oninput = (e) => { palDraft.bg = e.target.value; palDraftActive = true; $('palEditState').textContent = 'edited · live'; recolor(false); save(); };
+    $('palOutline').oninput = (e) => { palDraft.outline = e.target.value; palDraftActive = true; $('palEditState').textContent = 'edited · live'; recolor(false); save(); };
+    $('palOutlineAuto').onclick = () => {
+      palDraft.outline = null; palDraftActive = true;
+      $('palEditState').textContent = 'edited · live';
+      renderPalEditor(); recolor(false); save();
+    };
+    $('palSave').onclick = () => {
+      const draft = JSON.parse(JSON.stringify(palDraft));
+      if (P.paletteRef.kind === 'custom' && palDraftActive) {
+        CP.update(P.paletteRef.id, draft);
+        statusEl.textContent = 'custom palette updated';
+      } else {
+        const created = CP.create({ ...draft, name: draft.name + ' (custom)' });
+        if (created) P.paletteRef = { kind: 'custom', id: created.id };
+        statusEl.textContent = 'palette saved as custom';
+      }
+      palDraftActive = false;
+      loadPalDraft();
+      save(); syncControls(); recolor(false);
+    };
+    $('palDuplicate').onclick = () => {
+      const src = P.paletteRef.kind === 'custom' ? P.paletteRef.id : null;
+      const created = src ? CP.duplicate(src) : CP.create(JSON.parse(JSON.stringify(palDraft)));
+      if (created) {
+        P.paletteRef = { kind: 'custom', id: created.id };
+        palDraftActive = false; loadPalDraft();
+        buildPaletteGrid(); renderPalEditor();
+      }
+      statusEl.textContent = 'palette duplicated';
+      save(); recolor(false);
+    };
+    $('palDelete').onclick = () => {
+      if (P.paletteRef.kind !== 'custom') { statusEl.textContent = 'built-in palettes cannot be deleted'; return; }
+      CP.remove(P.paletteRef.id);
+      P.paletteRef = { kind: 'builtin', index: 0 };
+      palDraftActive = false; loadPalDraft();
+      syncControls(); refresh(); save();
+      statusEl.textContent = 'palette deleted';
+    };
+
+    // ---- gradient editor (inline in Gradient mode) ----
+    $('gradType').onchange = (e) => {
+      gradDraft.type = e.target.value;
+      gradDraftActive = true; syncGradEditState();
+      renderGradPreview(); recolor(false); save();
+    };
+    $('gradAngle').oninput = (e) => {
+      gradDraft.angle = +e.target.value;
+      $('gradAngleVal').textContent = gradDraft.angle + '°';
+      gradDraftActive = true; syncGradEditState();
+      renderGradPreview(); recolor(false); save();
+    };
+    $('gradAddStop').onclick = () => {
+      if (gradDraft.stops.length < 16) {
+        gradDraft.stops.push({ pos: 1, color: '#88aacc' });
+        gradDraft.stops.sort((a, b) => a.pos - b.pos);
+        gradDraftActive = true; syncGradEditState();
+        renderGradEditor(); recolor(false); save();
+      }
+    };
+    $('gradDraftReset').onclick = () => {
+      gradDraftActive = false;
+      loadGradDraft();
+      syncGradEditState();
+      renderGradEditor(); recolor(false); save();
+    };
+    $('gradSave').onclick = () => {
+      const g = JSON.parse(JSON.stringify(gradDraft));
+      const editingCustom = gradDraftActive && gradEditId && !GR.BUILTINS.some((x) => x.id === gradEditId);
+      const saved = GR.save(editingCustom ? { ...g, id: gradEditId } : g);
+      P.gradientId = saved.id;
+      gradEditId = saved.id;
+      gradDraftActive = false;
+      loadGradDraft();
+      save(); syncControls(); recolor(false);
+      statusEl.textContent = editingCustom ? 'custom gradient updated' : 'gradient saved as custom';
+    };
+    $('gradDelete').onclick = () => {
+      if (!gradEditId || GR.BUILTINS.some((g) => g.id === gradEditId)) {
+        statusEl.textContent = 'built-in gradients cannot be deleted';
+        return;
+      }
+      GR.remove(gradEditId);
+      P.gradientId = GR.BUILTINS[0].id;
+      gradDraftActive = false; loadGradDraft();
+      syncControls(); recolor(false); save();
+      statusEl.textContent = 'gradient deleted';
+    };
+
+    // ---- theme export/import (all template kinds) ----
+    $('themeExport').onclick = () => {
+      const json = CP.exportJSON(CP.list(), GR.list(), {
+        single: singleStore.list(),
+        duo: duoStore.list(),
+      });
+      const blob = new Blob([json], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'einstein-wallpaper-themes.json';
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+      statusEl.textContent = 'themes exported';
+    };
+    $('themeImport').onclick = () => $('themeFile').click();
+    $('themeFile').onchange = (e) => {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const res = CP.importJSON(String(reader.result));
+          if (res.extras) {
+            if (Array.isArray(res.extras.single)) res.extras.single.forEach((c) => { if (GR.isHexColor(c) && !singleStore.list().includes(c)) singleStore.add(c); });
+            if (Array.isArray(res.extras.duo)) res.extras.duo.forEach((p) => { if (p && GR.isHexColor(p.a) && GR.isHexColor(p.b) && !duoStore.list().some((q) => q.a === p.a && q.b === p.b)) duoStore.add(p); });
+            buildSingleTpls(); buildDuoTpls();
+          }
+          syncControls(); refresh(); save();
+          statusEl.textContent = `imported ${res.palettes} palettes, ${res.gradients} gradients` +
+            (res.extras ? `, ${res.extras.single.length || 0} single + ${res.extras.duo.length || 0} duotone templates` : '');
+        } catch (err) {
+          statusEl.textContent = 'import failed: ' + err.message;
+        }
+      };
+      reader.readAsText(file);
+      e.target.value = '';
+    };
+
+    // ---- effects ----
     const fxBind = (id, key, valId, fmt, immediate) => {
       $(id).oninput = (e) => {
         P.effects[key] = +e.target.value;
@@ -1029,126 +1357,6 @@
     fxBind('fxVignette', 'vignette', 'fxVignetteVal', (v) => Math.round(v) + '%', true);
     $('fxVignetteMode').onchange = (e) => { P.effects.vignetteMode = e.target.value; composeFrame(performance.now()); save(); };
 
-    // palette editor
-    $('palEditSelect').onchange = (e) => {
-      const v = e.target.value;
-      palEditRef = v.startsWith('bi:') ? { kind: 'builtin', index: +v.slice(3) } : { kind: 'custom', id: v.slice(3) };
-      loadPalDraft();
-      renderPalEditor();
-    };
-    $('palEditName').oninput = (e) => { palEditDraft.name = e.target.value; };
-    $('palAddColor').onclick = () => {
-      if (palEditDraft.colors.length < CP.MAX_COLORS) {
-        palEditDraft.colors.push('#88aacc');
-        renderPalEditor();
-      }
-    };
-    $('palEditBg').oninput = (e) => { palEditDraft.bg = e.target.value; renderPalPreview(); };
-    $('palEditOutline').oninput = (e) => { palEditDraft.outline = e.target.value; renderPalPreview(); };
-    $('palEditOutlineAuto').onclick = () => {
-      palEditDraft.outline = null;
-      renderPalEditor();
-    };
-    $('palSave').onclick = () => {
-      if (palEditRef.kind === 'custom') {
-        CP.update(palEditRef.id, palEditDraft);
-      } else {
-        const created = CP.create({ ...palEditDraft, name: palEditDraft.name + ' (custom)' });
-        if (created) { palEditRef = { kind: 'custom', id: created.id }; P.paletteRef = { kind: 'custom', id: created.id }; }
-      }
-      save(); syncControls(); refresh();
-      statusEl.textContent = 'palette saved';
-    };
-    $('palDuplicate').onclick = () => {
-      const src = palEditRef.kind === 'custom' ? palEditRef.id : null;
-      const created = src ? CP.duplicate(src) : CP.create(palEditDraft);
-      if (created) { palEditRef = { kind: 'custom', id: created.id }; syncPalEditorAll(); }
-      statusEl.textContent = 'palette duplicated';
-    };
-    $('palNew').onclick = () => {
-      const pal = PAL.get(P.paletteRef);
-      const created = CP.create({
-        name: 'New palette',
-        colors: [...pal.colors],
-        bg: pal.bg,
-        outline: pal.outline != null ? pal.outline : null,
-      });
-      if (created) { palEditRef = { kind: 'custom', id: created.id }; syncPalEditorAll(); }
-      statusEl.textContent = 'new palette created';
-    };
-    $('palDelete').onclick = () => {
-      if (palEditRef.kind !== 'custom') return;
-      CP.remove(palEditRef.id);
-      palEditRef = { kind: 'builtin', index: 0 };
-      if (P.paletteRef.kind === 'custom' && !CP.find(P.paletteRef.id)) {
-        P.paletteRef = { kind: 'builtin', index: 0 };
-      }
-      syncControls(); refresh(); save();
-      statusEl.textContent = 'palette deleted';
-    };
-
-    // theme import/export
-    $('themeExport').onclick = () => {
-      const json = CP.exportJSON();
-      const blob = new Blob([json], { type: 'application/json' });
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = 'einstein-wallpaper-themes.json';
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-      statusEl.textContent = 'themes exported';
-    };
-    $('themeImport').onclick = () => $('themeFile').click();
-    $('themeFile').onchange = (e) => {
-      const file = e.target.files && e.target.files[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = () => {
-        try {
-          const res = CP.importJSON(String(reader.result));
-          syncControls(); refresh(); save();
-          statusEl.textContent = `imported ${res.palettes} palettes, ${res.gradients} gradients`;
-        } catch (err) {
-          statusEl.textContent = 'import failed: ' + err.message;
-        }
-      };
-      reader.readAsText(file);
-      e.target.value = '';
-    };
-
-    // gradient editor
-    $('gradSelect').onchange = (e) => {
-      gradEditId = e.target.value;
-      P.gradientId = gradEditId;
-      loadGradDraft();
-      renderGradEditor();
-      refresh(); save();
-    };
-    $('gradType').onchange = (e) => { gradDraft.type = e.target.value; renderGradPreview(); };
-    $('gradAngle').oninput = (e) => { gradDraft.angle = +e.target.value; $('gradAngleVal').textContent = gradDraft.angle + '°'; renderGradPreview(); };
-    $('gradAddStop').onclick = () => {
-      if (gradDraft.stops.length < 16) {
-        gradDraft.stops.push({ pos: 1, color: '#88aacc' });
-        gradDraft.stops.sort((a, b) => a.pos - b.pos);
-        renderGradEditor();
-      }
-    };
-    $('gradSave').onclick = () => {
-      const saved = GR.save(JSON.parse(JSON.stringify(gradDraft)));
-      gradEditId = saved.id;
-      P.gradientId = saved.id;
-      save(); syncControls(); refresh();
-      statusEl.textContent = 'gradient saved';
-    };
-    $('gradDelete').onclick = () => {
-      if (!gradEditId || GR.BUILTINS.some((g) => g.id === gradEditId)) return;
-      GR.remove(gradEditId);
-      if (P.gradientId === gradEditId) P.gradientId = null;
-      gradEditId = null;
-      syncControls(); refresh(); save();
-      statusEl.textContent = 'gradient deleted';
-    };
-
     $('randomBtn').onclick = randomize;
     $('pngBtn').onclick = exportPNG;
     $('gifBtn').onclick = exportGIF;
@@ -1156,6 +1364,8 @@
     $('fsBtn').onclick = fullscreen;
     $('resetBtn').onclick = () => {
       P = JSON.parse(JSON.stringify(DEFAULTS));
+      palDraftActive = false; gradDraftActive = false;
+      loadPalDraft(); loadGradDraft();
       save(); syncControls(); refresh();
     };
     document.addEventListener('keydown', (e) => {
@@ -1170,7 +1380,8 @@
   bind();
   // default gradient selection
   if (!P.gradientId || !GR.find(P.gradientId)) P.gradientId = GR.BUILTINS[0].id;
-  gradEditId = P.gradientId;
+  loadPalDraft();
+  loadGradDraft();
   syncControls();
   regenerate();
 })();

@@ -35,30 +35,39 @@ holes, correct edge lengths, Penrose fat:thin ratio → φ, Cairo pentagon shape
 
 ### Color — one unified Color theme section
 
-A single **Color theme** panel with four modes; only the options that belong to
-the selected mode are shown:
+A single **Color theme** panel with four modes. Each mode owns its dedicated
+settings — arrangement, template library and an inline editor — and only the
+active mode's panel is shown. Every control applies to the wallpaper in
+real time, and every mode ships with templates you can customize further and
+save/load as your own:
 
-| Mode | Options |
-|------|---------|
-| **Single** | one tile color + background color |
-| **Palette** | arrangement (how colors spread across tiles) + the 26 built-in palettes + your custom palettes + background (from palette or custom color) |
-| **Gradient** | arrangement (continuous **Sweep**, quantized **Bands**, or **Random mix**) + gradient picker + background (solid color or the gradient itself) |
-| **Duotone** | two colors A/B + arrangement (checkerboard / sweep / random) + background color |
+| Mode | Dedicated settings |
+|------|--------------------|
+| **Single** | tile color picker + a template row of curated solid colors (save/delete your own) |
+| **Palette** | arrangement (how colors spread across tiles), the 26 built-in palettes as templates, inline color editor (add/remove/reorder, hex input), per-palette background + outline, save/duplicate/delete custom palettes |
+| **Gradient** | arrangement (continuous **Sweep**, quantized **Bands** with band count, or **Random mix**), gradient templates, inline editor (linear/radial/conic, angle, multi-stop color/position), save/delete custom gradients |
+| **Duotone** | arrangement (checkerboard / sweep / random), colors A + B, curated pair templates (save/delete your own) |
+
+Shared across modes: background source (from palette / gradient / custom
+color), **foreground opacity** (fade tiles and their outlines over the
+background — preview and every export format honor it), outline auto/manual
+color, and JSON theme export/import (palettes + gradients + single/duotone
+templates).
 
 The **arrangement** is family-aware: the hat offers Supertiles (patches), By
-orientation, Mirror split, Checkerboard and Random mix; periodic families offer
-By tile kind, By orientation, Checkerboard and Random mix.
+orientation, Mirror split, Checkerboard and Random mix; periodic families
+offer By tile kind / By orientation (hidden on families where every tile has
+the same kind or orientation — those would render one flat color),
+Checkerboard and Random mix. Sweep and Bands are normalized against the
+actual tile positions, so they stay full-range gradients at every rotation
+angle.
 
 - **26 curated built-in palettes** — from Midnight and Nord to Cyberpunk and
   Sakura, light and dark.
-- **Custom palette editor** — create, rename, duplicate and delete palettes; edit
-  colors with native pickers or hex values; add/remove/reorder colors; set the
-  background and outline colors (with the automatic outline feature); live preview.
-- **Gradient editor** — multi-stop gradients with per-stop color and position,
-  linear / radial / conic types, angle control, live preview; the gradient
-  selected in the theme section colors the tiling (continuous sampling) and/or
-  the background. Built-in gradients included.
-- **Theme import/export** — custom palettes + gradients as a validated JSON file.
+- **Template-driven editing** — pick a template, tweak anything (colors,
+  stops, angle, background, outline) with live feedback, then keep it as a
+  custom template; custom palettes/gradients/single colors/duotone pairs all
+  persist in the browser.
 - Every color change re-colors the live preview instantly (no scene rebuild).
 
 ### Visual effects
@@ -103,8 +112,9 @@ The removed v1 animations (Cascade, Drift, Hue cycle, Pulse) are gone.
 Settings (family, variant, color theme, effects, animation…) persist in
 `localStorage` with safe migration from older saves (legacy color modes and
 numeric palette indexes keep working). Custom palettes live in
-`ew-custom-palettes-v1`, gradients in `ew-gradients-v1`, both with stable IDs
-and defensive parsing.
+`ew-custom-palettes-v1`, gradients in `ew-gradients-v1`, single-color
+templates in `ew-single-templates-v1` and duotone pairs in
+`ew-duo-templates-v1` — all with stable IDs and defensive parsing.
 
 ## Quick start
 

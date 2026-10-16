@@ -239,6 +239,17 @@ label.check input { accent-color: var(--accent); }
 
 .swatch-sep { grid-column: 1 / -1; height: 1px; background: var(--line); margin: 3px 0; }
 
+/* single-color / duotone template swatches */
+.tplswatches { display: flex; flex-wrap: wrap; gap: 6px; }
+.tplswatches .tpl {
+  width: 26px; height: 26px; border-radius: 7px; cursor: pointer;
+  border: 2px solid rgba(255,255,255,.15);
+  padding: 0; transition: transform .1s;
+}
+.tplswatches .tpl:hover { transform: scale(1.1); }
+.tplswatches .tpl.on { border-color: #fff; box-shadow: 0 0 0 1px var(--accent); }
+.tpl-sep { align-self: center; width: 1px; height: 18px; background: var(--line); margin: 0 2px; }
+
 /* variant chips for long lists */
 select#variantSelect { max-width: 100%; }
 

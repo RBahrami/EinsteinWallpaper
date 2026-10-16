@@ -48,19 +48,17 @@ const palRef = { kind: 'builtin', index: 0 };
   const sc = polyScene();
   R.colorize(sc, { ...BASE, paletteRef: palRef, colorMap: 'sweep', rotation: 0 });
   const th = 0, gx = Math.cos(th + Math.PI / 6), gy = Math.sin(th + Math.PI / 6);
-  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-  for (const t of sc.tiles) {
-    if (t.cx < x0) x0 = t.cx; if (t.cx > x1) x1 = t.cx;
-    if (t.cy < y0) y0 = t.cy; if (t.cy > y1) y1 = t.cy;
-  }
-  const proj = sc.tiles.map((t) => (t.cx - x0) * gx + (t.cy - y0) * gy);
-  const len = Math.abs((x1 - x0) * gx) + Math.abs((y1 - y0) * gy) || 1;
-  const expect = sc.tiles.map((_, i) => Math.max(0, Math.min(255, Math.round(Math.min(1, Math.max(0, proj[i] / len)) * 255))));
+  const proj = sc.tiles.map((t) => (t.cx - 0) * gx + (t.cy - 0) * gy);
+  const pMin = Math.min(...proj), pMax = Math.max(...proj);
+  const span = (pMax - pMin) || 1;
+  const expect = sc.tiles.map((_, i) => Math.max(0, Math.min(255,
+    Math.round(Math.min(1, Math.max(0, (proj[i] - pMin) / span)) * 255))));
   let eq = true;
   for (let i = 0; i < expect.length; i++) if (expect[i] !== sc.lutIdx[i]) { eq = false; break; }
-  check('sweep matches projection formula', eq);
+  check('sweep matches tile-projection formula', eq);
   const distinct = new Set(sc.lutIdx).size;
   check('sweep uses many levels', distinct > 32, distinct);
+  check('sweep spans full 0..255 range', sc.lutIdx.includes(0) && sc.lutIdx.includes(255));
 }
 
 /* ---- bands: quantized subset of sweep ---- */
@@ -138,6 +136,57 @@ const palRef = { kind: 'builtin', index: 0 };
   // legacy alias
   R.colorize(sc, { ...BASE, family: 'hat', paletteRef: palRef, colorMap: 'gradient' });
   check('legacy gradient alias = sweep', new Set(sc.lutIdx).size > 16);
+}
+
+/* ---- sweep/bands rotation invariance (Task 9 fix: the old formula
+   collapsed to a single color whenever the projection axis had negative
+   components, i.e. rotation 150°..240°) ---- */
+{
+  const idxAt = (rot, map) => {
+    const sc = hatScene();
+    R.colorize(sc, { ...BASE, family: 'hat', paletteRef: palRef, colorMap: map, rotation: rot });
+    return new Set(sc.lutIdx).size;
+  };
+  for (const rot of [0, 90, 150, 165, 180, 195, 215, 240, 270, 315]) {
+    check(`hat sweep multi-color @ rot ${rot}`, idxAt(rot, 'sweep') > 16, idxAt(rot, 'sweep'));
+  }
+  {
+    const sc = hatScene();
+    R.colorize(sc, { ...BASE, family: 'hat', paletteRef: palRef, colorMap: 'bands', gradBands: 5, rotation: 215 });
+    const vals = new Set(sc.lutIdx);
+    check('hat bands @ rot215 uses all 5 bands', vals.size === 5, [...vals].sort((a, b) => a - b).join(','));
+  }
+  {
+    // sweep endpoints: the extreme tiles along the axis reach both 0 and 255
+    const sc = polyScene();
+    R.colorize(sc, { ...BASE, paletteRef: palRef, colorMap: 'sweep', rotation: 215 });
+    check('poly sweep @ rot215 spans endpoints',
+          sc.lutIdx.includes(0) && sc.lutIdx.includes(255),
+          `${Math.min(...sc.lutIdx)}..${Math.max(...sc.lutIdx)}`);
+  }
+}
+
+/* ---- degenerate categorical maps never render one flat color ---- */
+{
+  // hexagons have kindCount=1: 'kind' used to yield a single LUT index
+  const sc = R.buildScene({ ...BASE, family: 'hexagons', variant: 'standard' }, 640, 400, { budget: 60000 });
+  R.colorize(sc, { ...BASE, family: 'hexagons', paletteRef: palRef, colorMap: 'kind' });
+  check('hexagons kind falls back (>=2 values)', new Set(sc.lutIdx).size >= 2, new Set(sc.lutIdx).size);
+  const sc2 = R.buildScene({ ...BASE, family: 'squares', variant: 'standard' }, 640, 400, { budget: 60000 });
+  R.colorize(sc2, { ...BASE, family: 'squares', paletteRef: palRef, colorMap: 'orientation' });
+  check('squares orientation falls back (>=2 values)', new Set(sc2.lutIdx).size >= 2, new Set(sc2.lutIdx).size);
+}
+
+/* ---- buildLutFromColors (palette draft editor) ---- */
+{
+  const lut = R.buildLutFromColors(['#000000', '#ffffff']);
+  // the palette LUT is cyclic (same semantics as buildLut): index 255 wraps
+  check('buildLutFromColors start + cyclic wrap', lut[0] === '#000000' && lut[255] === lut[0], `${lut[0]}..${lut[255]}`);
+  // the cyclic ramp approaches white at the wrap point (254 = one step short)
+  check('buildLutFromColors traverses both colors',
+        lut.includes('#000000') && lut.some((c) => parseInt(c.slice(1, 3), 16) >= 250));
+  const lut3 = R.buildLutFromColors(['#ff0000']);
+  check('buildLutFromColors single color constant', lut3.every((c) => c === '#ff0000'));
 }
 
 /* ---- LUT builders ---- */

@@ -368,10 +368,29 @@
     // world-space cell for the checkerboard (hat edge ~ tile pitch)
     const cell = isHat ? (scene.hatEdge || 1) : 1;
 
+    // Sweep normalization: project every tile onto the sweep axis and
+    // normalize with the exact [min,max] range of the ACTUAL tiles. The naive
+    // "proj / (w*|gx|+h*|gy|)" formula collapsed to t=0 whenever the axis had
+    // negative components (rotation 150°..240°), rendering sweep AND bands as
+    // a single color; bbox-corner normalization left the extremes empty
+    // because the cluster bbox corners hold no tiles (hexagonal cluster).
+    let sMin = 0, sSpan = 1;
+    if (map === 'sweep' || map === 'gradient' || map === 'bands') {
+      let pMin = Infinity, pMax = -Infinity;
+      for (let i = 0; i < n; i++) {
+        const [x, y] = isHat
+          ? [scene.hats[i].x, scene.hats[i].y]
+          : [scene.tiles[i].cx, scene.tiles[i].cy];
+        const p = (x - bb.x0) * gx + (y - bb.y0) * gy;
+        if (p < pMin) pMin = p;
+        if (p > pMax) pMax = p;
+      }
+      sMin = pMin;
+      sSpan = (pMax - pMin) || 1;
+    }
     const sweepT = (x, y) => {
       const proj = (x - bb.x0) * gx + (y - bb.y0) * gy;
-      const len = Math.abs(bb.w * gx) + Math.abs(bb.h * gy) || 1;
-      return Math.min(1, Math.max(0, proj / len));
+      return Math.min(1, Math.max(0, (proj - sMin) / sSpan));
     };
     const checkerT = (x, y) => {
       const kx = Math.floor((x - bb.x0) / cell), ky = Math.floor((y - bb.y0) / cell);
@@ -413,6 +432,25 @@
       }
       lutIdx[i] = Math.max(0, Math.min(255, Math.round(t * 255)));
     }
+
+    // Degenerate-map guard: categorical arrangements (supertile patches, tile
+    // kind, orientation) are meaningless on families where every visible tile
+    // shares one class (e.g. hexagons have a single kind) and would render as
+    // ONE flat color. Fall back to the checker parity so the arrangement can
+    // never collapse to a single color.
+    if ((map === 'supertile' || map === 'kind' || map === 'orientation') && n > 1) {
+      const first = lutIdx[0];
+      let same = true;
+      for (let i = 1; i < n; i++) { if (lutIdx[i] !== first) { same = false; break; } }
+      if (same) {
+        // checkerT needs the positional bbox — compute it for non-positional maps
+        if (!bb) bb = isHat ? (scene._bb || (scene._bb = clusterBBox(scene.hats))) : centroidBBox(scene.tiles);
+        for (let i = 0; i < n; i++) {
+          const [x, y] = isHat ? [scene.hats[i].x, scene.hats[i].y] : [scene.tiles[i].cx, scene.tiles[i].cy];
+          lutIdx[i] = Math.round(checkerT(x, y) * 255);
+        }
+      }
+    }
     scene.lutIdx = lutIdx;
     return lutIdx;
   }
@@ -437,7 +475,13 @@
   function buildLut(source) {
     if (source && source._isGradient) return GR.makeLut(source.gradient);
     const pal = PAL.get(source);
-    const cols = pal.colors.map((c) => PAL.hexToRgb(c));
+    return buildLutFromColors(pal.colors);
+  }
+
+  // cycling LUT from a raw hex color list (used by the live palette editor:
+  // unsaved draft colors recolor the wallpaper without a palette object)
+  function buildLutFromColors(colors) {
+    const cols = colors.map((c) => PAL.hexToRgb(c));
     const lut = new Array(256);
     for (let i = 0; i < 256; i++) {
       const t = i / 255 * cols.length;
@@ -463,12 +507,16 @@
   /* ------------------------------------------------------- drawing */
 
   // paint tiles only (transparent background) onto ctx
+  // look.alpha (0..1, default 1) = foreground opacity: tiles and their
+  // outlines are drawn with that alpha over the background.
   function paintTiles(ctx, scene, look, colorOverride) {
     const W = scene.W, H = scene.H;
     const lw = look.outlineWidth || 0;
     const gap = look.gap || 0;
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
+    const fgAlpha = (look && look.alpha != null) ? Math.max(0, Math.min(1, +look.alpha)) : 1;
+    ctx.globalAlpha = fgAlpha;
 
     if (scene.kind === 'hat') {
       const outline = shrunkHatOutline(gap);
@@ -499,6 +547,7 @@
         ctx.fill();
         if (lw > 0) ctx.stroke();
       }
+      ctx.globalAlpha = 1;
       return;
     }
 
@@ -520,6 +569,7 @@
         ctx.lineTo(s[2], s[3]);
         ctx.stroke();
       }
+      ctx.globalAlpha = 1;
       return;
     }
 
@@ -550,6 +600,7 @@
       ctx.fill();
       if (lw > 0) { ctx.strokeStyle = look.line; ctx.lineWidth = lw; ctx.stroke(); }
     }
+    ctx.globalAlpha = 1;
   }
 
   // full scene paint onto a target ctx (used by Effects pipeline)
@@ -665,7 +716,7 @@
   /* ----------------------------------------------------- export API */
 
   root.Renderer = {
-    buildScene, colorize, buildLut, buildSolidLut, buildShimLuts,
+    buildScene, colorize, buildLut, buildLutFromColors, buildSolidLut, buildShimLuts,
     paintTiles, paintScene, makeAnimator,
     rng, hash2, shrunkHatOutline, shrunkPoly, clusterBBox,
   };

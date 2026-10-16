@@ -101,36 +101,134 @@
             <label>Mode</label>
             <div id="themeModeChips" class="chips"></div>
           </div>
-          <div class="row" id="themeMapRow">
-            <label for="themeMap">Arrangement</label>
-            <select id="themeMap"></select>
-          </div>
-          <div class="row" id="themeBandsRow">
-            <label>Bands <output id="themeBandsVal"></output></label>
-            <input type="range" id="themeBands" min="2" max="12" step="1">
-          </div>
-          <div class="row" id="singleColorRow">
-            <label for="singleColor">Tile color</label>
-            <input type="color" id="singleColor" value="#5bc8ff">
-          </div>
-          <div class="row two" id="duoRow">
-            <div>
-              <label for="duoA">Color A</label>
-              <input type="color" id="duoA" value="#5bc8ff">
+
+          <!-- ======================= SINGLE ======================= -->
+          <div id="panel-single">
+            <div class="row">
+              <label for="singleColor">Tile color</label>
+              <input type="color" id="singleColor" value="#5bc8ff">
             </div>
-            <div>
-              <label for="duoB">Color B</label>
-              <input type="color" id="duoB" value="#f4777f">
+            <div class="row">
+              <label>Templates <span class="hint" id="singleTplHint"></span></label>
+              <div id="singleTpls" class="tplswatches"></div>
+            </div>
+            <div class="btnrow">
+              <button id="singleTplSave" class="btn mini">💾 Save color</button>
+              <button id="singleTplDelete" class="btn mini ghost">🗑 Delete</button>
             </div>
           </div>
-          <div class="row" id="paletteRow">
-            <label>Palette <span class="hint" id="palName"></span></label>
-            <div id="paletteGrid" class="swatches"></div>
+
+          <!-- ======================= PALETTE ======================= -->
+          <div id="panel-palette">
+            <div class="row">
+              <label for="palMap">Arrangement</label>
+              <select id="palMap"></select>
+            </div>
+            <div class="row">
+              <label>Palette templates <span class="hint" id="palName"></span></label>
+              <div id="paletteGrid" class="swatches"></div>
+            </div>
+            <div class="row">
+              <label>Edit colors <span class="hint" id="palEditState"></span></label>
+              <div id="palStops" class="stoplist"></div>
+              <div class="btnrow tight">
+                <button id="palAddColor" class="btn mini">+ Color</button>
+                <button id="palDraftReset" class="btn mini">↺ Reset edits</button>
+              </div>
+            </div>
+            <div class="row two">
+              <div>
+                <label for="palBg">Background</label>
+                <input type="color" id="palBg" value="#0b1020">
+              </div>
+              <div>
+                <label for="palOutline">Outline</label>
+                <div class="outlinerow">
+                  <input type="color" id="palOutline" value="#101014">
+                  <button id="palOutlineAuto" class="btn mini" title="Use automatic outline color">Auto</button>
+                </div>
+              </div>
+            </div>
+            <div class="btnrow">
+              <button id="palSave" class="btn mini">💾 Save as custom</button>
+              <button id="palDuplicate" class="btn mini">⧉ Duplicate</button>
+              <button id="palDelete" class="btn mini ghost">🗑 Delete</button>
+            </div>
           </div>
-          <div class="row" id="gradientRow">
-            <label for="gradPick">Gradient</label>
-            <select id="gradPick"></select>
+
+          <!-- ======================= GRADIENT ======================= -->
+          <div id="panel-gradient">
+            <div class="row">
+              <label for="gradMapSel">Arrangement</label>
+              <select id="gradMapSel"></select>
+            </div>
+            <div class="row" id="gradBandsRow">
+              <label>Bands <output id="gradBandsVal"></output></label>
+              <input type="range" id="gradBands" min="2" max="12" step="1">
+            </div>
+            <div class="row">
+              <label for="gradPick">Gradient templates</label>
+              <select id="gradPick"></select>
+            </div>
+            <div class="row">
+              <label>Preview <span class="hint" id="gradEditState"></span></label>
+              <div class="gpreview"><canvas id="gradPreview" height="26"></canvas></div>
+            </div>
+            <div class="row two">
+              <div>
+                <label for="gradType">Type</label>
+                <select id="gradType">
+                  <option value="linear">Linear</option>
+                  <option value="radial">Radial</option>
+                  <option value="conic">Conic</option>
+                </select>
+              </div>
+              <div>
+                <label>Angle <output id="gradAngleVal"></output></label>
+                <input type="range" id="gradAngle" min="0" max="345" step="15">
+              </div>
+            </div>
+            <div class="row">
+              <label>Color stops <span class="hint" id="gradStopCount"></span></label>
+              <div id="gradStops" class="stoplist"></div>
+              <div class="btnrow tight">
+                <button id="gradAddStop" class="btn mini">+ Stop</button>
+                <button id="gradDraftReset" class="btn mini">↺ Reset edits</button>
+              </div>
+            </div>
+            <div class="btnrow">
+              <button id="gradSave" class="btn mini">💾 Save as custom</button>
+              <button id="gradDelete" class="btn mini ghost">🗑 Delete</button>
+            </div>
           </div>
+
+          <!-- ======================= DUOTONE ======================= -->
+          <div id="panel-duotone">
+            <div class="row">
+              <label for="duoMapSel">Arrangement</label>
+              <select id="duoMapSel"></select>
+            </div>
+            <div class="row two">
+              <div>
+                <label for="duoA">Color A</label>
+                <input type="color" id="duoA" value="#5bc8ff">
+              </div>
+              <div>
+                <label for="duoB">Color B</label>
+                <input type="color" id="duoB" value="#f4777f">
+              </div>
+            </div>
+            <div class="row">
+              <label>Templates <span class="hint" id="duoTplHint"></span></label>
+              <div id="duoTpls" class="tplswatches"></div>
+            </div>
+            <div class="btnrow">
+              <button id="duoTplSave" class="btn mini">💾 Save pair</button>
+              <button id="duoTplDelete" class="btn mini ghost">🗑 Delete</button>
+            </div>
+          </div>
+
+          <!-- ======================= SHARED ======================= -->
           <div class="row two" id="bgRow">
             <div id="bgSourceWrap">
               <label for="bgSource">Background</label>
@@ -141,106 +239,23 @@
               <input type="color" id="bgColor" value="#0b1020">
             </div>
           </div>
+          <div class="row">
+            <label>Foreground opacity <output id="fgAlphaVal"></output></label>
+            <input type="range" id="fgAlpha" min="0" max="100" step="1">
+          </div>
           <div class="row two">
             <label class="check"><input type="checkbox" id="lineAuto" checked> Auto outline</label>
             <input type="color" id="lineColor" value="#101014" title="Manual outline color">
           </div>
-        </div>
-      </details>
-
-      <details>
-        <summary>Palette editor</summary>
-        <div class="body">
-          <div class="row">
-            <label for="palEditSelect">Editing</label>
-            <select id="palEditSelect"></select>
-          </div>
-          <div class="row">
-            <label for="palEditName">Name</label>
-            <input type="text" id="palEditName" maxlength="60" placeholder="Palette name">
-          </div>
-          <div class="row">
-            <label>Colors <span class="hint" id="palEditCount"></span></label>
-            <div id="palEditColors" class="stoplist"></div>
-            <div class="btnrow tight">
-              <button id="palAddColor" class="btn mini">+ Color</button>
-            </div>
-          </div>
-          <div class="row two">
-            <div>
-              <label for="palEditBg">Background</label>
-              <input type="color" id="palEditBg" value="#0b1020">
-            </div>
-            <div>
-              <label for="palEditOutline">Outline (auto if empty)</label>
-              <div class="outlinerow">
-                <input type="color" id="palEditOutline" value="#101014">
-                <button id="palEditOutlineAuto" class="btn mini" title="Use automatic outline color">Auto</button>
-              </div>
-            </div>
-          </div>
-          <div class="row">
-            <label>Preview</label>
-            <div id="palEditPreview" class="gpreview"></div>
-          </div>
           <div class="btnrow">
-            <button id="palSave" class="btn">💾 Save</button>
-            <button id="palDuplicate" class="btn">⧉ Duplicate</button>
-          </div>
-          <div class="btnrow">
-            <button id="palNew" class="btn">＋ New from current</button>
-            <button id="palDelete" class="btn ghost">🗑 Delete</button>
-          </div>
-          <div class="btnrow">
-            <button id="themeExport" class="btn">⬆ Export themes</button>
-            <button id="themeImport" class="btn">⬇ Import themes</button>
+            <button id="themeExport" class="btn mini">⬆ Export themes</button>
+            <button id="themeImport" class="btn mini">⬇ Import</button>
             <input type="file" id="themeFile" accept=".json,application/json" hidden>
           </div>
-          <p class="help">Custom palettes persist in your browser and can be
-            exported/imported as JSON theme files (palettes + gradients).</p>
-        </div>
-      </details>
-
-      <details>
-        <summary>Gradient editor</summary>
-        <div class="body">
-          <div class="row">
-            <label for="gradSelect">Gradient</label>
-            <select id="gradSelect"></select>
-          </div>
-          <div class="row two">
-            <div>
-              <label for="gradType">Type</label>
-              <select id="gradType">
-                <option value="linear">Linear</option>
-                <option value="radial">Radial</option>
-                <option value="conic">Conic</option>
-              </select>
-            </div>
-            <div>
-              <label>Angle <output id="gradAngleVal"></output></label>
-              <input type="range" id="gradAngle" min="0" max="345" step="15">
-            </div>
-          </div>
-          <div class="row">
-            <label>Color stops <span class="hint" id="gradStopCount"></span></label>
-            <div id="gradStops" class="stoplist"></div>
-            <div class="btnrow tight">
-              <button id="gradAddStop" class="btn mini">+ Stop</button>
-            </div>
-          </div>
-          <div class="row">
-            <label>Preview</label>
-            <div class="gpreview"><canvas id="gradPreview" height="26"></canvas></div>
-          </div>
-          <div class="btnrow">
-            <button id="gradSave" class="btn">💾 Save as custom</button>
-            <button id="gradDelete" class="btn ghost">🗑 Delete</button>
-          </div>
-          <p class="help">The gradient selected here colors the tiling in
-            <i>Gradient</i> theme mode (and the background when
-            <i>Background → Gradient</i>); the editor below manages the
-            gradient library and its stops, type and angle.</p>
+          <p class="help">Every mode keeps its own arrangement, editor and
+            templates; edits apply to the wallpaper live. Saved templates and
+            custom palettes/gradients persist in the browser and travel with
+            the theme export/import files.</p>
         </div>
       </details>
 
