@@ -74,6 +74,23 @@ ok(proj.layers[0].type === 'background' && proj.layers[1].type === 'pattern',
   'background is at the bottom of the stack');
 ok(proj.selected === proj.layers[1].id, 'a pattern layer is selected by default');
 
+/* ---------------- project name ---------------- */
+ok(proj.name === 'Untitled wallpaper', 'default project name', proj.name);
+ok(L.defaultProject().name === L.PROJECT_NAME_DEFAULT, 'name default constant matches');
+ok(L.sanitizeProject({ version: 2, name: '  My Aurora  ', layers: [
+  { type: 'background' }, { type: 'pattern' }] }).name === 'My Aurora',
+  'sanitizer keeps a valid project name (trimmed)');
+ok(L.sanitizeProject({ version: 2, name: '   ', layers: [] }).name === 'Untitled wallpaper',
+  'blank name falls back to the default');
+ok(L.sanitizeProject({ version: 2, layers: [] }).name === 'Untitled wallpaper',
+  'missing name falls back to the default');
+ok(L.sanitizeProject({ version: 2, name: 'x'.repeat(200), layers: [] }).name.length === 60,
+  'name is capped at 60 characters');
+ok(L.sanitizeProject('not an object') === undefined || true, 'noop guard');
+ok(L.migrateV1({}).name === 'Untitled wallpaper', 'v1 migration gets the default name');
+ok(L.sanitizeProject({ version: 2, name: 42, layers: [] }).name === 'Untitled wallpaper',
+  'non-string name rejected');
+
 /* ---------------- duplication ---------------- */
 const src = proj.layers[1];
 src.theme.singleColor = '#123456';

@@ -1,8 +1,10 @@
 /*
  * layers.js — layer model for the EinsteinWallpaper multi-layer system.
  *
- * A project = { version: 2, aspect, orientation, resW, resH, selected, layers: [...] }
- * Only canvas dimensions / aspect / resolution are global; every visual
+ * A project = { version: 2, name, aspect, orientation, resW, resH,
+ * selected, layers: [...] }
+ * Only canvas dimensions / aspect / resolution are global (plus the free-form
+ * project `name` shown in the UI and stored in saved files); every visual
  * setting lives on a layer:
  *
  *   Background layer (always layers[0], can never be deleted or reordered).
@@ -182,9 +184,15 @@
     };
   }
 
+  const PROJECT_NAME_DEFAULT = 'Untitled wallpaper';
+  function projectName(v) {
+    return (typeof v === 'string' && v.trim()) ? v.trim().slice(0, 60) : PROJECT_NAME_DEFAULT;
+  }
+
   function defaultProject() {
     const proj = {
       version: 2,
+      name: PROJECT_NAME_DEFAULT,
       aspect: '16:9', orientation: 'landscape', resW: 1920, resH: 1080,
       selected: null,
       layers: [createBackground(), createPattern({ name: 'Pattern 1', _n: 1 })],
@@ -308,6 +316,7 @@
     }
     const proj = {
       version: 2,
+      name: projectName(raw.name),
       aspect: (typeof raw.aspect === 'string' && raw.aspect) ? raw.aspect : '16:9',
       orientation: raw.orientation === 'portrait' ? 'portrait' : 'landscape',
       resW: clampInt(raw.resW, 64, 8192, 1920),
@@ -385,7 +394,7 @@
   root.Layers = {
     MAX_PATTERN_LAYERS, FX_DEFAULTS, THEME_MODES, ANIMS,
     uid, clampInt, clampNum, hex, validPaletteRef, sanitizeFx, normGradient,
-    DEFAULT_BG_GRADIENT,
+    DEFAULT_BG_GRADIENT, PROJECT_NAME_DEFAULT, projectName,
     createBackground, createPattern, defaultProject,
     bgLayer, patternLayers, findLayer, selectedLayer,
     duplicateLayer, deleteLayer, moveLayer,

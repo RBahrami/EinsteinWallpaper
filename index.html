@@ -20,10 +20,30 @@
           <p class="sub">Einstein hat &amp; 13 tiling families</p>
         </div>
       </div>
-      <div class="actions">
-        <button id="randomBtn" class="btn primary" title="Random look (R)">🎲 Randomize</button>
-      </div>
     </header>
+
+    <!-- ======================= PROJECT BAR ======================= -->
+    <div id="projectBar">
+      <div class="prow">
+        <input type="text" id="projName" spellcheck="false" autocomplete="off"
+               maxlength="60" placeholder="Project name"
+               title="Project name — travels with saved files and exports">
+        <span id="saveState" class="sv ok" title="All changes are auto-saved in this browser">✓ saved</span>
+      </div>
+      <div class="prow btns">
+        <button id="undoBtn" class="btn mini" title="Undo (Ctrl+Z)" disabled>↶ Undo</button>
+        <button id="redoBtn" class="btn mini" title="Redo (Ctrl+Y)" disabled>↷ Redo</button>
+        <button id="projSaveBtn" class="btn mini" title="Download the whole project as a JSON file">💾 Save file</button>
+        <button id="projLoadBtn" class="btn mini" title="Load a project JSON file">📂 Load</button>
+        <input type="file" id="projFile" accept=".json,application/json" hidden>
+      </div>
+      <p class="help">The project is auto-saved in this browser as you edit.
+        <b>Save file</b> downloads it as one <b>JSON</b> file (all layers + custom
+        palettes/gradients) — the format is documented in
+        <b>docs/AGENT_GUIDE.md</b>, so agents can generate wallpapers by writing
+        that file and loading it here. <b>Undo/Redo (Ctrl+Z / Ctrl+Y)</b> reverts
+        any change, including layer operations and randomizers.</p>
+    </div>
 
     <div id="controls">
 
@@ -78,15 +98,20 @@
             <button id="layerDown" class="btn mini">↓ Down</button>
             <button id="layerDel" class="btn mini ghost">🗑 Delete</button>
           </div>
+          <div class="btnrow tight">
+            <button id="layerRand" class="btn mini" title="Randomize ALL settings of the selected layer (R)">🎲 Randomize layer</button>
+          </div>
           <p class="help">Click a layer to edit it in the sections below.
             The <b>Background</b> layer is pinned to the bottom — it cannot be
             deleted or reordered. Every pattern layer keeps its own tiling,
-            colors, effects and animation; exports render the whole stack.</p>
+            colors, effects and animation; exports render the whole stack.
+            <b>Randomize layer</b> (and the 🎲 buttons in each section) act on
+            the <b>selected layer only</b>.</p>
         </div>
       </details>
 
       <details open id="sec-tiling">
-        <summary>Tiling <span class="sumhint" id="hintTiling"></span></summary>
+        <summary>Tiling <span class="sumhint" id="hintTiling"></span><button class="dice" id="randTiling" title="Randomize this layer's tiling (variant, scale, rotation, gap, seed)">🎲</button></summary>
         <div class="body">
           <div class="row">
             <label>Tiling family</label>
@@ -128,7 +153,7 @@
       </details>
 
       <details open id="sec-theme">
-        <summary>Color theme <span class="sumhint" id="hintTheme"></span></summary>
+        <summary>Color theme <span class="sumhint" id="hintTheme"></span><button class="dice" id="randTheme" title="Randomize this layer's colors within the current mode">🎲</button></summary>
         <div class="body">
           <div class="row">
             <label>Mode</label>
@@ -283,7 +308,7 @@
 
       <!-- ======================= BACKGROUND LAYER ======================= -->
       <details open id="sec-bgprops">
-        <summary>Background layer</summary>
+        <summary>Background layer<button class="dice" id="randBg" title="Randomize the background fill (solid color or gradient)">🎲</button></summary>
         <div class="body">
           <div class="row">
             <label for="bgFillSource">Fill</label>
@@ -336,25 +361,8 @@
         </div>
       </details>
 
-      <!-- ======================= PROJECT FILE ======================= -->
-      <details id="sec-project">
-        <summary>Project file</summary>
-        <div class="body">
-          <div class="btnrow">
-            <button id="projSaveBtn" class="btn mini">💾 Save project</button>
-            <button id="projLoadBtn" class="btn mini">📂 Load project</button>
-            <input type="file" id="projFile" accept=".json,application/json" hidden>
-          </div>
-          <p class="help">Downloads/loads the whole project (all layers,
-            settings and custom palettes/gradients) as one <b>JSON</b> file.
-            The format is documented in <b>docs/AGENT_GUIDE.md</b> — agents
-            can generate wallpapers by producing that JSON and loading it
-            here.</p>
-        </div>
-      </details>
-
       <details id="sec-fx">
-        <summary>Visual effects <span class="sumhint" id="hintFx"></span></summary>
+        <summary>Visual effects <span class="sumhint" id="hintFx"></span><button class="dice" id="randFx" title="Randomize this layer's effects">🎲</button></summary>
         <div class="body">
           <div class="row">
             <label>Blur <output id="fxBlurVal"></output></label>
@@ -405,7 +413,7 @@
       </details>
 
       <details open id="sec-anim">
-        <summary>Animation <span class="sumhint" id="hintAnim"></span></summary>
+        <summary>Animation <span class="sumhint" id="hintAnim"></span><button class="dice" id="randAnim" title="Randomize this layer's animation (effect, speed, direction)">🎲</button></summary>
         <div class="body">
           <div class="row">
             <label for="animSelect">Effect</label>
@@ -480,6 +488,7 @@
 </div>
 <script src="js/hat-tiling.js"></script>
 <script src="js/layers.js"></script>
+<script src="js/history.js"></script>
 <script src="js/tilings.js"></script>
 <script src="js/palettes.js"></script>
 <script src="js/gradients.js"></script>

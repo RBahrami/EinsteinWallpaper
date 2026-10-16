@@ -20,13 +20,21 @@
  * legacy 'einstein-wallpaper-v1' blob is migrated once (background settings
  * -> Background layer, fgAlpha -> pattern layer opacity). Palettes,
  * gradients and color templates keep their own stores.
+ *
+ * Project bar (top of the sidebar): editable project name, a live save
+ * indicator (autosave + unsaved-draft warning), undo/redo (js/history.js:
+ * snapshot-based with same-control coalescing) and project file save/load.
+ * Randomization is section-scoped: the 🎲 dice in each section header
+ * randomizes that section of the SELECTED layer; "Randomize layer" in the
+ * Layers panel randomizes the whole selected layer.
  */
 (function () {
   'use strict';
 
   const R = window.Renderer, PAL = window.Palettes,
     TL = window.Tilings, GR = window.Gradients, CP = window.CustomPalettes,
-    FX = window.Effects, AP = window.Apng, LT = window.Layers;
+    FX = window.Effects, AP = window.Apng, LT = window.Layers,
+    HI = window.History;
 
   /* ------------------------------------------------------- presets */
 
@@ -99,6 +107,88 @@
 
   let project = loadProject();
 
+  /* ------------------------------------------------------- undo/redo */
+
+  // History snapshots capture the full committed state: the project AND the
+  // per-layer runtime drafts (unsaved palette/gradient tweaks), so draft
+  // edits are undoable too.
+  const history = HI.createHistory({ limit: 60 });
+
+  function serializeDrafts() {
+    const out = [];
+    for (const [id, d] of drafts) out.push([id, JSON.parse(JSON.stringify(d))]);
+    return out;
+  }
+  function restoreDrafts(list) {
+    drafts.clear();
+    for (const [id, d] of (list || [])) drafts.set(id, JSON.parse(JSON.stringify(d)));
+  }
+  function takeSnapshot() {
+    return { project: JSON.parse(JSON.stringify(project)), drafts: serializeDrafts() };
+  }
+
+  // human labels for history entries (keyed like the save() change keys)
+  const HIST_LABELS = {
+    name: 'Project name',
+    aspect: 'Aspect ratio', orientation: 'Orientation', resolution: 'Resolution',
+    opacity: 'Layer opacity', visibility: 'Layer visibility',
+    layerAdd: 'Layer added', layerDup: 'Layer duplicated', layerDel: 'Layer deleted',
+    layerMove: 'Layer reordered', layerRename: 'Layer renamed',
+    family: 'Tiling family', variant: 'Pattern variant', tileSize: 'Tile scale',
+    rotation: 'Rotation', gap: 'Tile gap', fillAlpha: 'Fill transparency',
+    outlineWidth: 'Outline width', lineAlpha: 'Border transparency', seed: 'Seed',
+    mode: 'Theme mode', palette: 'Palette', palDraft: 'Palette edits',
+    palBg: 'Palette background', palOutline: 'Palette outline', palAdd: 'Palette colors',
+    gradient: 'Gradient', gradDraft: 'Gradient edits', gradBands: 'Gradient bands',
+    singleColor: 'Single color', duoA: 'Duotone color A', duoB: 'Duotone color B',
+    colorMap: 'Palette arrangement', gradMap: 'Gradient arrangement', duoMap: 'Duotone arrangement',
+    lineAuto: 'Auto outline', lineColor: 'Outline color',
+    fxBlur: 'Blur', fxGlow: 'Glow', fxGlowRadius: 'Glow radius', fxShadow: 'Shadow',
+    fxShadowSoft: 'Shadow softness', fxShadowOff: 'Shadow offset', fxGrain: 'Film grain',
+    fxVignette: 'Vignette', fxVignetteMode: 'Vignette mode',
+    animation: 'Animation', animSpeed: 'Animation speed', flowAngle: 'Animation direction',
+    bgSource: 'Background fill', bgColor: 'Background color',
+    bgGradTpl: 'Background gradient template', bgGradType: 'Background gradient type',
+    bgGradAngle: 'Background gradient angle', bgGradStops: 'Background gradient stops',
+    bgGradReset: 'Background gradient reset',
+    randomLayer: 'Randomize layer', randomTiling: 'Randomize tiling',
+    randomTheme: 'Randomize colors', randomFx: 'Randomize effects',
+    randomAnim: 'Randomize animation', randomBg: 'Randomize background',
+    themeImport: 'Themes imported', reset: 'Project reset', load: 'Project loaded',
+  };
+
+  function applySnapshot(snap) {
+    project = JSON.parse(JSON.stringify(snap.project));
+    restoreDrafts(snap.drafts);
+    cache.clear(); // rebuild scenes against the restored state
+    save();
+    syncControls();
+    composeFrame(performance.now(), true);
+    refresh();
+  }
+  function doUndo() {
+    const e = history.undo();
+    if (!e) return;
+    applySnapshot(e.snapshot);
+    syncHistoryButtons();
+    notice('Undo · ' + e.label);
+  }
+  function doRedo() {
+    const e = history.redo();
+    if (!e) return;
+    applySnapshot(e.snapshot);
+    syncHistoryButtons();
+    notice('Redo · ' + e.label);
+  }
+  function syncHistoryButtons() {
+    const u = $('undoBtn'), r = $('redoBtn');
+    if (!u || !r) return;
+    u.disabled = !history.canUndo();
+    r.disabled = !history.canRedo();
+    u.title = history.undoLabel() ? 'Undo (Ctrl+Z) · ' + history.undoLabel() : 'Undo (Ctrl+Z)';
+    r.title = history.redoLabel() ? 'Redo (Ctrl+Y) · ' + history.redoLabel() : 'Redo (Ctrl+Y)';
+  }
+
   function loadProject() {
     // 1) a saved v2 project wins; persist the sanitized form immediately so
     //    conversions (e.g. legacy palette background) stick without any edit
@@ -144,8 +234,52 @@
     return proj;
   }
 
-  function save() {
+  function save(key, label) {
     try { localStorage.setItem(STORE_V2, JSON.stringify(project)); } catch (e) { /* ignore */ }
+    if (key) {
+      history.push(key, label || HIST_LABELS[key] || key, takeSnapshot());
+      syncHistoryButtons();
+    }
+    updateSaveState();
+  }
+
+  /* ------------------------------------------------- save indicator */
+
+  function hhmm() {
+    const d = new Date();
+    return (d.getHours() < 10 ? '0' : '') + d.getHours() + ':' +
+           (d.getMinutes() < 10 ? '0' : '') + d.getMinutes();
+  }
+  // mode: undefined = autosave state, 'exported' / 'loaded' = file actions
+  function updateSaveState(mode) {
+    const el = $('saveState');
+    if (!el) return;
+    if (mode === 'exported') {
+      el.textContent = '✓ exported ' + hhmm();
+      el.className = 'sv ok';
+      el.title = 'Project file downloaded';
+      return;
+    }
+    if (mode === 'loaded') {
+      el.textContent = '✓ loaded ' + hhmm();
+      el.className = 'sv ok';
+      el.title = 'Project loaded from file';
+      return;
+    }
+    let anyDraft = false;
+    for (const d of drafts.values()) {
+      if ((d.pal && d.pal.active) || (d.grad && d.grad.active)) { anyDraft = true; break; }
+    }
+    if (anyDraft) {
+      el.textContent = '● unsaved draft';
+      el.className = 'sv warn';
+      el.title = 'This layer has live palette/gradient edits that are NOT ' +
+        'persisted — save them as a custom palette/gradient to keep them.';
+    } else {
+      el.textContent = '✓ saved ' + hhmm();
+      el.className = 'sv ok';
+      el.title = 'All changes are auto-saved in this browser (localStorage).';
+    }
   }
 
   // generic template store (Single colors, Duotone pairs) — localStorage
@@ -301,7 +435,7 @@
     if (!THEME_MODES.some((m) => m[0] === mode)) mode = 'palette';
     layer.theme.mode = mode;
     ensureMapValid(layer);
-    save(); syncControls(); recolor(layer);
+    save('mode', 'Theme mode'); syncControls(); recolor(layer);
   }
 
   /* ------------------------------------------------- per-layer cache */
@@ -445,7 +579,7 @@
     layer.theme.paletteRef = ref;
     draftFor(layer.id).pal.active = false;
     loadPalDraft(layer);
-    save();
+    save('palette', 'Palette selected');
     syncControls();
     recolor(layer);
   }
@@ -482,14 +616,14 @@
       col.type = 'color'; col.value = c;
       col.oninput = () => {
         palDraft.colors[i] = col.value; palEdited(layer);
-        buildPaletteGrid(layer); recolor(layer); save();
+        buildPaletteGrid(layer); recolor(layer); save('palDraft', 'Palette colors');
       };
       const hexin = document.createElement('input');
       hexin.type = 'text'; hexin.value = c; hexin.className = 'hextext'; hexin.spellcheck = false;
       hexin.onchange = () => {
         if (GR.isHexColor(hexin.value)) {
           palDraft.colors[i] = GR.normHex(hexin.value); palEdited(layer);
-          buildPaletteGrid(layer); renderPalEditor(layer); recolor(layer); save();
+          buildPaletteGrid(layer); renderPalEditor(layer); recolor(layer); save('palDraft', 'Palette colors');
         } else hexin.value = palDraft.colors[i];
       };
       const up = document.createElement('button');
@@ -497,7 +631,7 @@
       up.onclick = () => {
         if (i > 0) {
           [palDraft.colors[i - 1], palDraft.colors[i]] = [palDraft.colors[i], palDraft.colors[i - 1]];
-          palEdited(layer); buildPaletteGrid(layer); renderPalEditor(layer); recolor(layer); save();
+          palEdited(layer); buildPaletteGrid(layer); renderPalEditor(layer); recolor(layer); save('palDraft', 'Palette color order');
         }
       };
       const down = document.createElement('button');
@@ -505,7 +639,7 @@
       down.onclick = () => {
         if (i < palDraft.colors.length - 1) {
           [palDraft.colors[i + 1], palDraft.colors[i]] = [palDraft.colors[i], palDraft.colors[i + 1]];
-          palEdited(layer); buildPaletteGrid(layer); renderPalEditor(layer); recolor(layer); save();
+          palEdited(layer); buildPaletteGrid(layer); renderPalEditor(layer); recolor(layer); save('palDraft', 'Palette color order');
         }
       };
       const del = document.createElement('button');
@@ -513,7 +647,7 @@
       del.onclick = () => {
         if (palDraft.colors.length > 1) {
           palDraft.colors.splice(i, 1);
-          palEdited(layer); buildPaletteGrid(layer); renderPalEditor(layer); recolor(layer); save();
+          palEdited(layer); buildPaletteGrid(layer); renderPalEditor(layer); recolor(layer); save('palDraft', 'Palette colors');
         }
       };
       row.append(col, hexin, up, down, del);
@@ -564,7 +698,7 @@
     fillGradientSelect($('gradPick'), id);
     syncControls();
     recolor(layer);
-    save();
+    save('gradient', 'Gradient selected');
   }
   function gradEdited(layer) {
     const d = draftFor(layer.id);
@@ -589,7 +723,7 @@
       col.oninput = () => {
         gradDraft.stops[i].color = col.value;
         gradEdited(layer);
-        renderGradPreview(layer); recolor(layer); save();
+        renderGradPreview(layer); recolor(layer); save('gradDraft', 'Gradient stops');
       };
       const pos = document.createElement('input');
       pos.type = 'number'; pos.min = 0; pos.max = 100; pos.step = 1;
@@ -599,7 +733,7 @@
         gradDraft.stops[i].pos = Math.max(0, Math.min(100, +pos.value || 0)) / 100;
         gradDraft.stops.sort((a, b) => a.pos - b.pos);
         gradEdited(layer);
-        renderGradEditor(layer); recolor(layer); save();
+        renderGradEditor(layer); recolor(layer); save('gradDraft', 'Gradient stop position');
       };
       const del = document.createElement('button');
       del.className = 'mini-btn'; del.textContent = '×'; del.title = 'Remove stop';
@@ -607,7 +741,7 @@
         if (gradDraft.stops.length > 2) {
           gradDraft.stops.splice(i, 1);
           gradEdited(layer);
-          renderGradEditor(layer); recolor(layer); save();
+          renderGradEditor(layer); recolor(layer); save('gradDraft', 'Gradient stops');
         }
       };
       row.append(col, pos, del);
@@ -642,7 +776,7 @@
     SINGLE_TPLS.forEach((c) => {
       box.appendChild(makeTplSwatch(c, c === layer.theme.singleColor, () => {
         layer.theme.singleColor = c; $('singleColor').value = c;
-        buildSingleTpls(layer); recolor(layer); save();
+        buildSingleTpls(layer); recolor(layer); save('singleColor', 'Single color template');
       }));
     });
     const customs = singleStore.list();
@@ -653,7 +787,7 @@
       customs.forEach((c, i) => {
         box.appendChild(makeTplSwatch(c, c === layer.theme.singleColor, () => {
           layer.theme.singleColor = c; $('singleColor').value = c;
-          buildSingleTpls(layer); recolor(layer); save();
+          buildSingleTpls(layer); recolor(layer); save('singleColor', 'Single color template');
         }, i));
       });
     }
@@ -674,7 +808,7 @@
       box.appendChild(makeTplSwatch(`linear-gradient(135deg, ${a} 50%, ${b} 50%)`, pairOn(a, b), () => {
         layer.theme.duoA = a; layer.theme.duoB = b;
         $('duoA').value = a; $('duoB').value = b;
-        buildDuoTpls(layer); recolor(layer); save();
+        buildDuoTpls(layer); recolor(layer); save('duoA', 'Duotone pair');
       }));
     });
     const customs = duoStore.list();
@@ -686,7 +820,7 @@
         box.appendChild(makeTplSwatch(`linear-gradient(135deg, ${p.a} 50%, ${p.b} 50%)`, pairOn(p.a, p.b), () => {
           layer.theme.duoA = p.a; layer.theme.duoB = p.b;
           $('duoA').value = p.a; $('duoB').value = p.b;
-          buildDuoTpls(layer); recolor(layer); save();
+          buildDuoTpls(layer); recolor(layer); save('duoA', 'Duotone pair');
         }, i));
       });
     }
@@ -897,6 +1031,16 @@
     if (!l) return 'wallpaper';
     return l.family === 'hat' ? 'einstein' : l.family;
   }
+  // file base for downloads: the project name (slugged) when the user named
+  // the project, otherwise the tiling-family tag
+  function fileBase() {
+    const n = (project.name || '').trim();
+    if (n && n !== LT.PROJECT_NAME_DEFAULT) {
+      const s = n.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+      if (s) return s;
+    }
+    return famTag();
+  }
   function downloadBlob(blob, name) {
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
@@ -947,7 +1091,7 @@
     }
     compositeComposition(off.getContext('2d'), W, H, 0, false, parts);
     off.toBlob((blob) => {
-      downloadBlob(blob, `${famTag()}-${W}x${H}.png`);
+      downloadBlob(blob, `${fileBase()}-${W}x${H}.png`);
       const n = parts.reduce((a, p) => a + (p.canvas ? 1 : 0), 0);
       statusEl.textContent = `PNG saved · ${n} layer${n > 1 ? 's' : ''} · ${W}x${H} · ${(performance.now() - t0).toFixed(0)} ms`;
     }, 'image/png');
@@ -1045,7 +1189,7 @@
       }
       const bytes = writer.finish();
       downloadBlob(new Blob([bytes], { type: 'image/gif' }),
-        `${famTag()}-live-${frames}f-${W}x${H}.gif`);
+        `${fileBase()}-live-${frames}f-${W}x${H}.gif`);
       const note = plan.compressed < 1 ? ' · loop compressed' : '';
       statusEl.textContent = `GIF saved · ${frames} frame${frames > 1 ? 's' : ''} · ${W}x${H} · ` +
         `${(bytes.length / 1048576).toFixed(1)} MB${note}`;
@@ -1078,7 +1222,7 @@
       }
       const bytes = enc.finish();
       downloadBlob(new Blob([bytes], { type: 'image/apng' }),
-        `${famTag()}-live-${frames}f-${W}x${H}.png`);
+        `${fileBase()}-live-${frames}f-${W}x${H}.png`);
       const note = plan.compressed < 1 ? ' · loop compressed' : '';
       statusEl.textContent = `APNG saved · ${frames} frame${frames > 1 ? 's' : ''} · ${W}x${H} · ` +
         `${(bytes.length / 1048576).toFixed(1)} MB (lossless)${note}`;
@@ -1135,32 +1279,146 @@
     project = fixProjectRefs(LT.sanitizeProject(extractProject(data)));
     cache.clear();
     drafts.clear();
-    save(); syncControls(); refresh();
+    save('load', 'Project loaded');
+    updateSaveState('loaded');
+    syncControls(); refresh();
     notice('Project loaded · ' + LT.patternLayers(project).length +
       ' pattern layer' + (LT.patternLayers(project).length > 1 ? 's' : ''));
   }
 
   /* ------------------------------------------------ randomize/reset */
 
+  // Randomizers are section-scoped: each touches ONE section of the selected
+  // layer (or the background fill), so users can explore per-aspect variations
+  // without losing the rest of their design. "Randomize layer" (Layers panel,
+  // or the R key) randomizes the whole selected layer.
+
+  function randomizeBg() {
+    const rr = Math.random;
+    const layer = LT.bgLayer(project);
+    const src = rr() < 0.5 ? 'solid' : 'gradient';
+    layer.bg.source = src;
+    if (src === 'gradient') {
+      const all = GR.all();
+      seedBgGradient(all[Math.floor(rr() * all.length)].id);
+    } else {
+      const vivid = ['#0b1020', '#071018', '#1a0e14', '#0e1a12', '#241432', '#10141c'];
+      layer.bg.color = vivid[Math.floor(rr() * vivid.length)];
+    }
+    save('randomBg', 'Randomize background');
+    syncControls(); recolorAll();
+    notice('Randomized "Background" fill');
+  }
+
+  // Tiling section: variant, scale, rotation, gap, seed — family stays.
+  function randomizeTiling() {
+    const layer = SP();
+    if (!layer || layer.type !== 'pattern') return;
+    const rr = Math.random;
+    const fam = TL.get(layer.family);
+    layer.variant = fam.variants[Math.floor(rr() * fam.variants.length)].id;
+    layer.tileSize = Math.round(16 + rr() * 74);
+    layer.rotation = Math.floor(rr() * 24) * 15;
+    layer.gap = rr() < 0.6 ? 0 : +(rr() * 0.05).toFixed(3);
+    layer.seed = 1 + Math.floor(rr() * 99999);
+    save('randomTiling', 'Randomize tiling');
+    syncControls(); refresh();
+    notice(`Randomized tiling of "${layer.name}"`);
+  }
+
+  // Color theme section: stays within the layer's current mode.
+  function randomizeTheme() {
+    const layer = SP();
+    if (!layer || layer.type !== 'pattern') return;
+    const rr = Math.random;
+    const vivid = ['#5bc8ff', '#ff8bd2', '#ffe14d', '#6be3a2', '#b07bff', '#ff8a5b', '#4dffb8', '#f4777f'];
+    const d = draftFor(layer.id);
+    const th = layer.theme;
+    if (th.mode === 'single') {
+      th.singleColor = vivid[Math.floor(rr() * vivid.length)];
+    } else if (th.mode === 'palette') {
+      const nC = CP.count();
+      th.paletteRef = (nC && rr() < 0.25)
+        ? { kind: 'custom', id: CP.list()[Math.floor(rr() * nC)].id }
+        : { kind: 'builtin', index: Math.floor(rr() * PAL.LIST.length) };
+      d.pal.active = false;
+      loadPalDraft(layer);
+      const pOpts = arrOptions(layer, 'palette');
+      th.colorMap = pOpts[Math.floor(rr() * pOpts.length)];
+    } else if (th.mode === 'gradient') {
+      const all = GR.all();
+      th.gradientId = all[Math.floor(rr() * all.length)].id;
+      d.grad.active = false;
+      loadGradDraft(layer);
+      const gOpts = arrOptions(layer, 'gradient');
+      th.gradMap = gOpts[Math.floor(rr() * gOpts.length)];
+      th.gradBands = 3 + Math.floor(rr() * 6);
+    } else { // duotone
+      th.duoA = vivid[Math.floor(rr() * vivid.length)];
+      th.duoB = PAL.hslRotate(th.duoA, 110 + rr() * 140);
+      const dOpts = arrOptions(layer, 'duotone');
+      th.duoMap = dOpts[Math.floor(rr() * dOpts.length)];
+    }
+    ensureMapValid(layer);
+    save('randomTheme', 'Randomize colors');
+    syncControls(); recolor(layer);
+    notice(`Randomized colors of "${layer.name}"`);
+  }
+
+  // Visual effects section: one coherent profile (mostly clean, sometimes a
+  // glow / shadow / grain+vignette / soft-focus look).
+  function randomizeFx() {
+    const layer = SP();
+    if (!layer || layer.type !== 'pattern') return;
+    const rr = Math.random;
+    const fx = { ...LT.FX_DEFAULTS };
+    const r = rr();
+    if (r >= 0.35) { // 35% chance: keep it clean
+      if (r < 0.55) {
+        fx.glow = 15 + rr() * 30;
+        fx.glowRadius = 10 + rr() * 40;
+      } else if (r < 0.72) {
+        fx.shadow = 20 + rr() * 35;
+        fx.shadowSoft = 8 + rr() * 30;
+        fx.shadowOff = 4 + rr() * 14;
+      } else if (r < 0.88) {
+        fx.grain = 5 + rr() * 15;
+        fx.vignette = 15 + rr() * 30;
+        fx.vignetteMode = rr() < 0.7 ? 'dark' : 'light';
+      } else {
+        fx.blur = 1 + rr() * 4;
+        fx.glow = 10 + rr() * 20;
+      }
+    }
+    layer.effects = fx;
+    save('randomFx', 'Randomize effects');
+    syncControls(); composeFrame(performance.now(), true);
+    notice(`Randomized effects of "${layer.name}"`);
+  }
+
+  // Animation section: effect, speed, direction.
+  function randomizeAnim() {
+    const layer = SP();
+    if (!layer || layer.type !== 'pattern') return;
+    const rr = Math.random;
+    const r = rr();
+    layer.animation = r < 0.25 ? 'none' : r < 0.5 ? 'shimmer' : r < 0.75 ? 'flow' : 'glowwave';
+    layer.animSpeed = +(0.5 + rr() * 2).toFixed(1);
+    layer.flowAngle = Math.floor(rr() * 24) * 15;
+    save('randomAnim', 'Randomize animation');
+    syncControls(); refresh();
+    notice(`Randomized animation of "${layer.name}"`);
+  }
+
   function randomize() {
     const rr = Math.random;
     const layer = SL();
     if (!layer) return;
     if (layer.type === 'background') {
-      const src = rr() < 0.5 ? 'solid' : 'gradient';
-      layer.bg.source = src;
-      if (src === 'gradient') {
-        const all = GR.all();
-        seedBgGradient(all[Math.floor(rr() * all.length)].id);
-      } else {
-        const vivid = ['#0b1020', '#071018', '#1a0e14', '#0e1a12', '#241432', '#10141c'];
-        layer.bg.color = vivid[Math.floor(rr() * vivid.length)];
-      }
-      save(); syncControls(); recolorAll();
-      notice('Randomized "Background"');
+      randomizeBg();
       return;
     }
-    // pattern layer
+    // pattern layer: everything at once
     layer.family = rr() < 0.35 ? 'hat' : TL.FAMILIES[1 + Math.floor(rr() * (TL.FAMILIES.length - 1))].id;
     const fam = TL.get(layer.family);
     layer.variant = fam.variants[Math.floor(rr() * fam.variants.length)].id;
@@ -1204,7 +1462,8 @@
       layer.effects[pick] = pick === 'glow' ? 20 + rr() * 25 : pick === 'grain' ? 8 + rr() * 12 : 25 + rr() * 25;
     }
     ensureMapValid(layer);
-    save(); syncControls(); refresh();
+    save('randomLayer', 'Randomize layer');
+    syncControls(); refresh();
     notice(`Randomized "${layer.name}" (selected layer only)`);
   }
 
@@ -1231,7 +1490,7 @@
       eye.onclick = (ev) => {
         ev.stopPropagation();
         layer.visible = !layer.visible;
-        save();
+        save('visibility', 'Layer visibility');
         buildLayersPanel();
         composeFrame(performance.now(), true);
       };
@@ -1267,7 +1526,7 @@
     layer.theme.gradientId = GR.BUILTINS[0].id;
     project.layers.push(layer);
     project.selected = layer.id;
-    save(); syncControls(); refresh();
+    save('layerAdd', 'Layer added'); syncControls(); refresh();
     notice(`Layer "${layer.name}" added`);
   }
   function dupLayer() {
@@ -1280,7 +1539,7 @@
     project.selected = copy.id;
     const d = drafts.get(sel.id);
     if (d) drafts.set(copy.id, JSON.parse(JSON.stringify(d)));
-    save(); syncControls(); refresh();
+    save('layerDup', 'Layer duplicated'); syncControls(); refresh();
     notice(`Duplicated as "${copy.name}" (new id)`);
   }
   function renameLayer() {
@@ -1290,7 +1549,7 @@
     if (name == null) return;
     const trimmed = name.trim().slice(0, 40);
     if (trimmed) sel.name = trimmed;
-    save(); syncControls();
+    save('layerRename', 'Layer renamed'); syncControls();
   }
   function delLayer() {
     const sel = SL();
@@ -1304,14 +1563,14 @@
     cache.delete(sel.id);   // release the layer's scene/scratch canvases
     drafts.delete(sel.id);
     project.selected = LT.patternLayers(project)[0].id;
-    save(); syncControls(); refresh();
+    save('layerDel', 'Layer deleted'); syncControls(); refresh();
     notice(`Layer "${name}" deleted`);
   }
   function moveSelLayer(dir) {
     const sel = SL();
     if (!sel) return;
     if (LT.moveLayer(project, sel.id, dir)) {
-      save(); syncControls();
+      save('layerMove', 'Layer reordered'); syncControls();
       composeFrame(performance.now(), true);
       notice(`Moved "${sel.name}" ${dir < 0 ? 'up' : 'down'}`);
     }
@@ -1340,7 +1599,7 @@
         project.aspect = a.id;
         project.orientation = naturalOrientation(a);
         applyResForAspect();
-        syncControls(); refresh(); save();
+        syncControls(); refresh(); save('aspect', 'Aspect ratio');
       };
       box.appendChild(b);
     }
@@ -1404,7 +1663,7 @@
         layer.family = fam.id;
         layer.variant = fam.defaultVariant;
         ensureMapValid(layer);
-        save(); syncControls(); refresh();
+        save('family'); syncControls(); refresh();
       };
       grid.appendChild(b);
     }
@@ -1503,7 +1762,7 @@
       col.type = 'color'; col.value = s.color;
       col.oninput = () => {
         bg.gradient.stops[i].color = col.value;
-        save(); renderBgGradPreview(); recolorAll();
+        save('bgGradStops'); renderBgGradPreview(); recolorAll();
       };
       const pos = document.createElement('input');
       pos.type = 'number'; pos.min = 0; pos.max = 100; pos.step = 1;
@@ -1512,14 +1771,14 @@
       pos.onchange = () => {
         bg.gradient.stops[i].pos = Math.max(0, Math.min(100, +pos.value || 0)) / 100;
         bg.gradient.stops.sort((a, b) => a.pos - b.pos);
-        save(); renderBgGradEditor(); recolorAll();
+        save('bgGradStops'); renderBgGradEditor(); recolorAll();
       };
       const del = document.createElement('button');
       del.className = 'mini-btn'; del.textContent = '×'; del.title = 'Remove stop';
       del.onclick = () => {
         if (bg.gradient.stops.length > 2) {
           bg.gradient.stops.splice(i, 1);
-          save(); renderBgGradEditor(); recolorAll();
+          save('bgGradStops'); renderBgGradEditor(); recolorAll();
         }
       };
       row.append(col, pos, del);
@@ -1588,6 +1847,8 @@
   }
 
   function syncControls() {
+    const nameEl = $('projName');
+    if (nameEl && document.activeElement !== nameEl) nameEl.value = project.name || LT.PROJECT_NAME_DEFAULT;
     buildAspectChips();
     buildResSelect();
     buildLayersPanel();
@@ -1619,12 +1880,12 @@
       const [w, h] = e.target.value.split('x').map(Number);
       project.resW = w; project.resH = h;
       $('resW').value = w; $('resH').value = h;
-      refresh(); save();
+      refresh(); save('resolution');
     };
     const resChanged = () => {
       project.resW = Math.max(64, Math.min(8192, +$('resW').value || project.resW));
       project.resH = Math.max(64, Math.min(8192, +$('resH').value || project.resH));
-      refresh(); save();
+      refresh(); save('resolution');
     };
     $('resW').onchange = resChanged;
     $('resH').onchange = resChanged;
@@ -1632,9 +1893,30 @@
       b.onclick = () => {
         project.orientation = b.dataset.orient;
         applyResForAspect();
-        syncControls(); refresh(); save();
+        syncControls(); refresh(); save('orientation');
       };
     });
+
+    // ---- project bar ----
+    const commitName = () => {
+      const v = ($('projName').value || '').trim().slice(0, 60);
+      const next = v || LT.PROJECT_NAME_DEFAULT;
+      if (next === (project.name || LT.PROJECT_NAME_DEFAULT)) {
+        $('projName').value = next;
+        return;
+      }
+      project.name = next;
+      $('projName').value = next;
+      save('name', 'Project name');
+      notice('Project named "' + next + '"');
+    };
+    $('projName').onchange = commitName;
+    $('projName').onkeydown = (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); e.target.blur(); }
+      if (e.key === 'Escape') { e.preventDefault(); $('projName').value = project.name || LT.PROJECT_NAME_DEFAULT; e.target.blur(); }
+    };
+    $('undoBtn').onclick = doUndo;
+    $('redoBtn').onclick = doRedo;
 
     // ---- layers panel ----
     $('layerAdd').onclick = addPatternLayer;
@@ -1649,7 +1931,7 @@
       sel.opacity = Math.max(0, Math.min(100, Math.round(+e.target.value || 0)));
       $('layerOpacityVal').textContent = sel.opacity + '%';
       composeFrame(performance.now(), true);
-      save();
+      save('opacity');
       const meta = $('layerList').children[project.layers.indexOf(sel)];
       if (meta) meta.querySelector('.lmeta').textContent =
         sel.type === 'background' ? bgSourceLabel(sel) : sel.opacity + '%';
@@ -1660,67 +1942,67 @@
       const l = SL();
       if (!l || l.type !== 'background') return;
       l.bg.source = e.target.value === 'gradient' ? 'gradient' : 'solid';
-      save(); syncControls(); recolorAll();
+      save('bgSource'); syncControls(); recolorAll();
     };
     $('bgFillColor').oninput = (e) => {
       const l = SL();
       if (!l || l.type !== 'background') return;
       l.bg.color = e.target.value;
-      save(); recolorAll();
+      save('bgColor'); recolorAll();
     };
     // background gradient editor (owned full gradient spec, live edits)
     $('bgGradTpl').onchange = (e) => {
       seedBgGradient(e.target.value);
-      save(); syncControls(); recolorAll();
+      save('bgGradTpl'); syncControls(); recolorAll();
     };
     $('bgGradType').onchange = (e) => {
       const bg = LT.bgLayer(project).bg;
       bg.gradient.type = e.target.value;
-      save(); renderBgGradEditor(); recolorAll();
+      save('bgGradType'); renderBgGradEditor(); recolorAll();
     };
     $('bgGradAngle').oninput = (e) => {
       const bg = LT.bgLayer(project).bg;
       bg.gradient.angle = ((Math.round(+e.target.value) || 0) % 360 + 360) % 360;
       $('bgGradAngleVal').textContent = bg.gradient.angle + '°';
-      save(); renderBgGradPreview(); recolorAll();
+      save('bgGradAngle'); renderBgGradPreview(); recolorAll();
     };
     $('bgGradAddStop').onclick = () => {
       const bg = LT.bgLayer(project).bg;
       if (bg.gradient.stops.length < 16) {
         bg.gradient.stops.push({ pos: 1, color: '#88aacc' });
         bg.gradient.stops.sort((a, b) => a.pos - b.pos);
-        save(); renderBgGradEditor(); recolorAll();
+        save('bgGradStops'); renderBgGradEditor(); recolorAll();
       }
     };
     $('bgGradDraftReset').onclick = () => {
       seedBgGradient(LT.bgLayer(project).bg.gradientId);
-      save(); syncControls(); recolorAll();
+      save('bgGradReset'); syncControls(); recolorAll();
     };
 
     // ---- tiling (selected pattern layer) ----
-    $('tileSize').oninput = (e) => { const l = SP(); l.tileSize = +e.target.value; $('tileSizeVal').textContent = l.tileSize + ' px'; refresh(); save(); };
-    $('rotation').oninput = (e) => { const l = SP(); l.rotation = +e.target.value; $('rotationVal').textContent = l.rotation + '°'; refresh(); save(); };
-    $('gap').oninput = (e) => { const l = SP(); l.gap = e.target.value / 100; $('gapVal').textContent = e.target.value + '%'; recolor(l); save(); };
-    $('fillAlpha').oninput = (e) => { const l = SP(); l.fillAlpha = Math.max(0, Math.min(100, Math.round(+e.target.value || 0))); $('fillAlphaVal').textContent = l.fillAlpha + '%'; recolor(l); save(); };
-    $('outlineWidth').oninput = (e) => { const l = SP(); l.outlineWidth = +e.target.value; $('outlineWidthVal').textContent = (+e.target.value).toFixed(1) + ' px'; recolor(l); save(); };
-    $('lineAlpha').oninput = (e) => { const l = SP(); l.lineAlpha = Math.max(0, Math.min(100, Math.round(+e.target.value || 0))); $('lineAlphaVal').textContent = l.lineAlpha + '%'; recolor(l); save(); };
-    $('seed').oninput = (e) => { const l = SP(); l.seed = +e.target.value || 1; $('seedVal').textContent = '#' + l.seed; refresh(); save(); };
-    $('animSpeed').oninput = (e) => { const l = SP(); l.animSpeed = +e.target.value; $('animSpeedVal').textContent = (+e.target.value).toFixed(1) + '×'; recolor(l); save(); };
-    $('flowAngle').oninput = (e) => { const l = SP(); l.flowAngle = +e.target.value; $('flowAngleVal').textContent = l.flowAngle + '°'; recolor(l); save(); };
-    $('animSelect').onchange = (e) => { const l = SP(); l.animation = e.target.value; syncAnimVisibility(l); refresh(); save(); };
-    $('variantSelect').onchange = (e) => { const l = SP(); l.variant = e.target.value; refresh(); save(); };
+    $('tileSize').oninput = (e) => { const l = SP(); l.tileSize = +e.target.value; $('tileSizeVal').textContent = l.tileSize + ' px'; refresh(); save('tileSize'); };
+    $('rotation').oninput = (e) => { const l = SP(); l.rotation = +e.target.value; $('rotationVal').textContent = l.rotation + '°'; refresh(); save('rotation'); };
+    $('gap').oninput = (e) => { const l = SP(); l.gap = e.target.value / 100; $('gapVal').textContent = e.target.value + '%'; recolor(l); save('gap'); };
+    $('fillAlpha').oninput = (e) => { const l = SP(); l.fillAlpha = Math.max(0, Math.min(100, Math.round(+e.target.value || 0))); $('fillAlphaVal').textContent = l.fillAlpha + '%'; recolor(l); save('fillAlpha'); };
+    $('outlineWidth').oninput = (e) => { const l = SP(); l.outlineWidth = +e.target.value; $('outlineWidthVal').textContent = (+e.target.value).toFixed(1) + ' px'; recolor(l); save('outlineWidth'); };
+    $('lineAlpha').oninput = (e) => { const l = SP(); l.lineAlpha = Math.max(0, Math.min(100, Math.round(+e.target.value || 0))); $('lineAlphaVal').textContent = l.lineAlpha + '%'; recolor(l); save('lineAlpha'); };
+    $('seed').oninput = (e) => { const l = SP(); l.seed = +e.target.value || 1; $('seedVal').textContent = '#' + l.seed; refresh(); save('seed'); };
+    $('animSpeed').oninput = (e) => { const l = SP(); l.animSpeed = +e.target.value; $('animSpeedVal').textContent = (+e.target.value).toFixed(1) + '×'; recolor(l); save('animSpeed'); };
+    $('flowAngle').oninput = (e) => { const l = SP(); l.flowAngle = +e.target.value; $('flowAngleVal').textContent = l.flowAngle + '°'; recolor(l); save('flowAngle'); };
+    $('animSelect').onchange = (e) => { const l = SP(); l.animation = e.target.value; syncAnimVisibility(l); refresh(); save('animation'); };
+    $('variantSelect').onchange = (e) => { const l = SP(); l.variant = e.target.value; refresh(); save('variant'); };
 
     // ---- color theme: per-mode arrangements (selected layer) ----
-    $('palMap').onchange = (e) => { const l = SP(); l.theme.colorMap = e.target.value; recolor(l); save(); };
-    $('gradMapSel').onchange = (e) => { const l = SP(); l.theme.gradMap = e.target.value; syncThemeVisibility(l); recolor(l); save(); };
-    $('duoMapSel').onchange = (e) => { const l = SP(); l.theme.duoMap = e.target.value; recolor(l); save(); };
-    $('gradBands').oninput = (e) => { const l = SP(); l.theme.gradBands = Math.max(2, Math.min(12, +e.target.value || 5)); $('gradBandsVal').textContent = l.theme.gradBands; recolor(l); save(); };
-    $('singleColor').oninput = (e) => { const l = SP(); l.theme.singleColor = e.target.value; buildSingleTpls(l); recolor(l); save(); };
-    $('duoA').oninput = (e) => { const l = SP(); l.theme.duoA = e.target.value; buildDuoTpls(l); recolor(l); save(); };
-    $('duoB').oninput = (e) => { const l = SP(); l.theme.duoB = e.target.value; buildDuoTpls(l); recolor(l); save(); };
+    $('palMap').onchange = (e) => { const l = SP(); l.theme.colorMap = e.target.value; recolor(l); save('colorMap'); };
+    $('gradMapSel').onchange = (e) => { const l = SP(); l.theme.gradMap = e.target.value; syncThemeVisibility(l); recolor(l); save('gradMap'); };
+    $('duoMapSel').onchange = (e) => { const l = SP(); l.theme.duoMap = e.target.value; recolor(l); save('duoMap'); };
+    $('gradBands').oninput = (e) => { const l = SP(); l.theme.gradBands = Math.max(2, Math.min(12, +e.target.value || 5)); $('gradBandsVal').textContent = l.theme.gradBands; recolor(l); save('gradBands'); };
+    $('singleColor').oninput = (e) => { const l = SP(); l.theme.singleColor = e.target.value; buildSingleTpls(l); recolor(l); save('singleColor'); };
+    $('duoA').oninput = (e) => { const l = SP(); l.theme.duoA = e.target.value; buildDuoTpls(l); recolor(l); save('duoA'); };
+    $('duoB').oninput = (e) => { const l = SP(); l.theme.duoB = e.target.value; buildDuoTpls(l); recolor(l); save('duoB'); };
     $('gradPick').onchange = (e) => applyGradientId(SP(), e.target.value);
-    $('lineAuto').onchange = (e) => { const l = SP(); l.lineAuto = e.target.checked; $('lineColor').disabled = l.lineAuto; recolor(l); save(); };
-    $('lineColor').oninput = (e) => { const l = SP(); l.lineColor = e.target.value; recolor(l); save(); };
+    $('lineAuto').onchange = (e) => { const l = SP(); l.lineAuto = e.target.checked; $('lineColor').disabled = l.lineAuto; recolor(l); save('lineAuto'); };
+    $('lineColor').oninput = (e) => { const l = SP(); l.lineColor = e.target.value; recolor(l); save('lineColor'); };
 
     // ---- single / duotone template save/delete ----
     $('singleTplSave').onclick = () => {
@@ -1762,7 +2044,7 @@
       if (d.pal.draft.colors.length < CP.MAX_COLORS) {
         d.pal.draft.colors.push('#88aacc');
         palEdited(l);
-        buildPaletteGrid(l); renderPalEditor(l); recolor(l); save();
+        buildPaletteGrid(l); renderPalEditor(l); recolor(l); save('palAdd', 'Palette colors');
       }
     };
     $('palDraftReset').onclick = () => {
@@ -1771,21 +2053,21 @@
       d.pal.active = false;
       loadPalDraft(l);
       $('palEditState').textContent = '';
-      buildPaletteGrid(l); renderPalEditor(l); recolor(l); save();
+      buildPaletteGrid(l); renderPalEditor(l); recolor(l); save('palDraft', 'Palette edits reset');
     };
     $('palBg').oninput = (e) => {
       const l = SP();
       const d = draftFor(l.id);
       if (!d.pal.draft) loadPalDraft(l);
       d.pal.draft.bg = e.target.value;
-      palEdited(l); recolor(l); save();
+      palEdited(l); recolor(l); save('palBg', 'Palette background');
     };
     $('palOutline').oninput = (e) => {
       const l = SP();
       const d = draftFor(l.id);
       if (!d.pal.draft) loadPalDraft(l);
       d.pal.draft.outline = e.target.value;
-      palEdited(l); recolor(l); save();
+      palEdited(l); recolor(l); save('palOutline', 'Palette outline');
     };
     $('palOutlineAuto').onclick = () => {
       const l = SP();
@@ -1793,7 +2075,7 @@
       if (!d.pal.draft) loadPalDraft(l);
       d.pal.draft.outline = null;
       palEdited(l);
-      renderPalEditor(l); recolor(l); save();
+      renderPalEditor(l); recolor(l); save('palOutline', 'Palette outline');
     };
     $('palSave').onclick = () => {
       const l = SP();
@@ -1810,7 +2092,7 @@
       }
       d.pal.active = false;
       loadPalDraft(l);
-      save(); syncControls(); recolor(l);
+      save('palette', 'Palette saved'); syncControls(); recolor(l);
     };
     $('palDuplicate').onclick = () => {
       const l = SP();
@@ -1824,7 +2106,7 @@
         buildPaletteGrid(l); renderPalEditor(l);
       }
       statusEl.textContent = 'palette duplicated';
-      save(); recolor(l);
+      save('palette', 'Palette duplicated'); recolor(l);
     };
     $('palDelete').onclick = () => {
       const l = SP();
@@ -1833,7 +2115,7 @@
       l.theme.paletteRef = { kind: 'builtin', index: 0 };
       const d = draftFor(l.id);
       d.pal.active = false; loadPalDraft(l);
-      syncControls(); refresh(); save();
+      syncControls(); refresh(); save('palette', 'Palette deleted');
       statusEl.textContent = 'palette deleted';
     };
 
@@ -1844,7 +2126,7 @@
       if (!d.grad.draft) loadGradDraft(l);
       d.grad.draft.type = e.target.value;
       gradEdited(l);
-      renderGradPreview(l); recolor(l); save();
+      renderGradPreview(l); recolor(l); save('gradDraft', 'Gradient type');
     };
     $('gradAngle').oninput = (e) => {
       const l = SP();
@@ -1853,7 +2135,7 @@
       d.grad.draft.angle = +e.target.value;
       $('gradAngleVal').textContent = d.grad.draft.angle + '°';
       gradEdited(l);
-      renderGradPreview(l); recolor(l); save();
+      renderGradPreview(l); recolor(l); save('gradDraft', 'Gradient angle');
     };
     $('gradAddStop').onclick = () => {
       const l = SP();
@@ -1863,7 +2145,7 @@
         d.grad.draft.stops.push({ pos: 1, color: '#88aacc' });
         d.grad.draft.stops.sort((a, b) => a.pos - b.pos);
         gradEdited(l);
-        renderGradEditor(l); recolor(l); save();
+        renderGradEditor(l); recolor(l); save('gradDraft', 'Gradient stops');
       }
     };
     $('gradDraftReset').onclick = () => {
@@ -1872,7 +2154,7 @@
       d.grad.active = false;
       loadGradDraft(l);
       syncGradEditState(l);
-      renderGradEditor(l); recolor(l); save();
+      renderGradEditor(l); recolor(l); save('gradDraft', 'Gradient edits reset');
     };
     $('gradSave').onclick = () => {
       const l = SP();
@@ -1885,7 +2167,7 @@
       d.grad.editId = saved.id;
       d.grad.active = false;
       loadGradDraft(l);
-      save(); syncControls(); recolor(l);
+      save('gradient', 'Gradient saved'); syncControls(); recolor(l);
       statusEl.textContent = editingCustom ? 'custom gradient updated' : 'gradient saved as custom';
     };
     $('gradDelete').onclick = () => {
@@ -1898,7 +2180,7 @@
       GR.remove(d.grad.editId);
       l.theme.gradientId = GR.BUILTINS[0].id;
       d.grad.active = false; loadGradDraft(l);
-      syncControls(); recolor(l); save();
+      syncControls(); recolor(l); save('gradient', 'Gradient deleted');
       statusEl.textContent = 'gradient deleted';
     };
 
@@ -1924,7 +2206,7 @@
             if (Array.isArray(res.extras.duo)) res.extras.duo.forEach((p) => { if (p && GR.isHexColor(p.a) && GR.isHexColor(p.b) && !duoStore.list().some((q) => q.a === p.a && q.b === p.b)) duoStore.add(p); });
           }
           fixProjectRefs(project);
-          syncControls(); refresh(); save();
+          syncControls(); refresh(); save('themeImport', 'Themes imported');
           statusEl.textContent = `imported ${res.palettes} palettes, ${res.gradients} gradients` +
             (res.extras ? `, ${res.extras.single.length || 0} single + ${res.extras.duo.length || 0} duotone templates` : '');
         } catch (err) {
@@ -1943,7 +2225,7 @@
         $(valId).textContent = fmt(+e.target.value);
         // post-processing only: recompose reusing the painted scene canvases
         composeFrame(performance.now(), true);
-        save();
+        save('fx' + key[0].toUpperCase() + key.slice(1));
       };
     };
     fxBind('fxBlur', 'blur', 'fxBlurVal', (v) => v + ' px');
@@ -1954,15 +2236,27 @@
     fxBind('fxShadowOff', 'shadowOff', 'fxShadowOffVal', (v) => v + ' px');
     fxBind('fxGrain', 'grain', 'fxGrainVal', (v) => Math.round(v) + '%');
     fxBind('fxVignette', 'vignette', 'fxVignetteVal', (v) => Math.round(v) + '%');
-    $('fxVignetteMode').onchange = (e) => { SP().effects.vignetteMode = e.target.value; composeFrame(performance.now(), true); save(); };
+    $('fxVignetteMode').onchange = (e) => { SP().effects.vignetteMode = e.target.value; composeFrame(performance.now(), true); save('fxVignetteMode'); };
 
-    $('randomBtn').onclick = randomize;
+    // ---- section-scoped randomizers (dice in the section headers) ----
+    // preventDefault/stopPropagation so clicking the dice never toggles the section
+    const dice = (id, fn) => {
+      $(id).onclick = (e) => { e.preventDefault(); e.stopPropagation(); fn(); };
+    };
+    dice('randTiling', randomizeTiling);
+    dice('randTheme', randomizeTheme);
+    dice('randFx', randomizeFx);
+    dice('randAnim', randomizeAnim);
+    dice('randBg', randomizeBg);
+
+    $('layerRand').onclick = randomize;
     $('pngBtn').onclick = exportPNG;
     $('gifBtn').onclick = exportGIF;
     $('apngBtn').onclick = exportAPNG;
     $('projSaveBtn').onclick = () => {
       downloadBlob(new Blob([JSON.stringify(buildProjectFile(), null, 2)],
-        { type: 'application/json' }), 'einstein-wallpaper-project.json');
+        { type: 'application/json' }), `${fileBase()}-project.json`);
+      updateSaveState('exported');
       statusEl.textContent = 'project saved as JSON';
     };
     $('projLoadBtn').onclick = () => $('projFile').click();
@@ -1986,13 +2280,22 @@
       project.layers[1].theme.gradientId = GR.BUILTINS[0].id;
       cache.clear();
       drafts.clear();
-      save(); syncControls(); refresh();
+      save('reset', 'Project reset'); syncControls(); refresh();
       notice('Project reset (all layers)');
     };
     document.addEventListener('keydown', (e) => {
+      const k = (e.key || '').toLowerCase();
+      if ((e.ctrlKey || e.metaKey) && k === 'z' && !e.shiftKey) {
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return; // native text undo
+        e.preventDefault(); doUndo(); return;
+      }
+      if ((e.ctrlKey || e.metaKey) && (k === 'y' || (k === 'z' && e.shiftKey))) {
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+        e.preventDefault(); doRedo(); return;
+      }
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
-      if (e.key === 'r') randomize();
-      if (e.key === 'f') fullscreen();
+      if (k === 'r') randomize();
+      if (k === 'f') fullscreen();
     });
     window.addEventListener('resize', () => { refresh(); });
     document.addEventListener('fullscreenchange', () => { setTimeout(refresh, 60); });
@@ -2003,4 +2306,7 @@
   bind();
   syncControls();
   regenerate();
+  history.reset(takeSnapshot()); // base entry: the state the page loaded with
+  syncHistoryButtons();
+  updateSaveState();
 })();

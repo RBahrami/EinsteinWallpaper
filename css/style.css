@@ -47,7 +47,41 @@ body {
   clip-path: polygon(20% 78%, 8% 46%, 26% 20%, 56% 10%, 82% 26%, 92% 56%, 68% 84%, 40% 90%);
   display: inline-block;
 }
-.actions { margin-top: 12px; }
+/* ---------------- project bar (top of sidebar) ---------------- */
+#projectBar {
+  padding: 10px 16px 12px;
+  border-bottom: 1px solid var(--line);
+}
+#projectBar .prow {
+  display: flex; gap: 8px; align-items: center;
+  margin: 0 0 8px;
+}
+#projectBar .prow:last-of-type { margin-bottom: 0; }
+#projectBar .prow.btns .btn { flex: 1; padding: 6px 4px; }
+#projName {
+  flex: 1; min-width: 0; padding: 7px 9px;
+  background: var(--bg2); color: var(--text);
+  border: 1px solid var(--line); border-radius: 7px;
+  outline: none; font: inherit; font-weight: 600;
+}
+#projName:focus { border-color: #3a4b66; }
+#saveState {
+  flex: none; font-size: 10.5px; letter-spacing: .3px;
+  white-space: nowrap; font-variant-numeric: tabular-nums;
+}
+#saveState.ok { color: #6be3a2; }
+#saveState.warn { color: #ffe14d; }
+#projectBar .help { font-size: 10.5px; padding: 7px 9px; margin-top: 9px; line-height: 1.5; }
+
+/* dice buttons: section-scoped randomizers, live in the summary row */
+.dice {
+  flex: none; width: 21px; height: 21px; margin-left: 6px;
+  line-height: 1; font-size: 11px; padding: 0;
+  background: transparent; color: var(--dim);
+  border: 1px solid var(--line); border-radius: 6px;
+  cursor: pointer; transition: all .12s;
+}
+.dice:hover { border-color: var(--accent); color: var(--text); background: var(--bg2); }
 
 #controls { overflow-y: auto; flex: 1; padding-bottom: 24px; }
 #controls::-webkit-scrollbar { width: 9px; }

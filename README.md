@@ -56,6 +56,11 @@ The studio is a **layer compositor**. The **Layers panel** manages the stack:
 - Add, **duplicate** (copies every setting, assigns a fresh ID), rename,
   delete and **reorder** pattern layers; toggle each layer's visibility and
   adjust its **opacity 0–100%**.
+- **Randomize layer** (Layers panel, or the <kbd>R</kbd> key) re-rolls every
+  setting of the selected layer — it never touches any other layer. The 🎲
+  dice in each section header randomizes just that section (tiling, colors
+  within the current theme mode, effects, animation, or the background
+  fill), so you can explore variations without losing the rest of the design.
 - Selecting a layer points the existing Tiling / Color theme / Visual effects /
   Animation sections at it — there is one set of controls, not one per layer.
   Switching selection never mixes configurations between layers.
@@ -164,12 +169,30 @@ layer's opacity, and palettes/gradients/templates are kept intact. Custom
 palettes live in `ew-custom-palettes-v1`, gradients in `ew-gradients-v1`,
 single-color templates in `ew-single-templates-v1` and duotone pairs in
 `ew-duo-templates-v1` — all with stable IDs and defensive parsing.
-**Randomize** acts on the selected layer (the status bar says which);
 **Reset** restores the whole default project.
 
-**Project file (save/load as JSON):** *Project file → Save project* downloads
+### Project bar, undo/redo
+The **project bar** sits at the top of the sidebar and carries everything
+project-level:
+
+- **Project name** — free-form (≤ 60 chars), shown in the bar, stored in the
+  project and used for downloaded filenames (project JSON and exports).
+- **Save indicator** — `✓ saved HH:MM` once the autosave has caught up, and a
+  `● unsaved draft` warning while a live palette/gradient edit is only a
+  runtime draft (save it as a custom template to keep it). Saving a project
+  file flashes `✓ exported`.
+- **Undo / Redo** — snapshot-based (`js/history.js`): every committed change is
+  undoable with **Ctrl+Z / Ctrl+Y** (or ⌘Z / ⌘Shift+Z / Ctrl+Y), including
+  layer add/duplicate/delete/reorder, tiling, colors, effects, animation,
+  background fill, randomizers, project reset and project load. Rapid edits
+  to the same control (a full slider drag, a color-picker sweep) coalesce into
+  ONE undo step; up to 60 steps are kept; a new edit after an undo discards
+  the redo tail. Unsaved palette/gradient drafts are snapshot too, so even
+  those are undoable. Buttons show tooltips naming the next undo/redo step.
+
+**Project file (save/load as JSON):** *Save file* in the project bar downloads
 the entire project — all layers plus every custom palette, gradient and
-template — as one self-contained JSON file; *Load project* restores it on any
+template — as one self-contained JSON file; *Load* restores it on any
 machine. Agents can **generate wallpapers by writing that JSON** themselves:
 [docs/AGENT_GUIDE.md](docs/AGENT_GUIDE.md) documents every field, all built-in
 palette/gradient references, and includes ready-to-adapt examples (minimal,
@@ -226,8 +249,10 @@ js/gif.js             dependency-free animated GIF89a encoder (median-cut
                       palette, Floyd-Steinberg dithering, LZW, loop extension)
 js/apng.js            dependency-free lossless APNG encoder (CRC32 chunks,
                       adaptive PNG filtering, DEFLATE + stored fallback)
+js/history.js         undo/redo history (snapshot-based, same-control
+                      coalescing, 60-step limit)
 js/app.js             UI wiring, layer compositor, caches, exports, persistence,
-                      project-file save/load (JSON)
+                      project-file save/load (JSON), undo/redo integration
 tests/                geometry + unit verification (see below)
 docs/AGENT_GUIDE.md   JSON project-format reference for agents: generate a
                       wallpaper by writing the project JSON and loading it
@@ -257,8 +282,12 @@ bun tests/test-theme.js
 
 # layer model tests (factories, background protection, duplication,
 # reordering, v1 migration, sanitizer, owned background gradients,
-# fill/line alpha, export-loop planning)
+# fill/line alpha, project name, export-loop planning)
 bun tests/test-layers.js
+
+# undo/redo history tests (push/undo/redo, coalescing, redo-tail
+# truncation, entry limit, deep-cloned snapshots)
+bun tests/test-history.js
 ```
 
 `scripts/qa_studio.py` (development machine only; needs Playwright) drives the real
@@ -266,8 +295,10 @@ UI in headless Chromium: loads the app, renders every family, switches color the
 modes, edits palettes and gradients, applies effects, checks animation frames, and
 exercises PNG/GIF/APNG export at the chosen canvas resolution. `scripts/qa_layers.py`
 covers the layer system end to end (stack operations, per-layer independence,
-alpha compositing, migration, persistence, exports incl. transparency), and
-`scripts/qa_apng.py`
+alpha compositing, migration, persistence, exports incl. transparency),
+`scripts/qa_undoredo.py` covers the project bar (name + save indicator),
+undo/redo (buttons, Ctrl+Z/Y, coalescing, redo-tail truncation, structural
+ops) and the section-scoped 🎲 randomizers, and `scripts/qa_apng.py`
 additionally proves the APNG export is pixel-perfect by comparing the decoded file
 byte-for-byte against an in-page reference render.
 

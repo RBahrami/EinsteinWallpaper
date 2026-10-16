@@ -2,8 +2,8 @@
 
 This guide is for **AI agents and power users** who want to create wallpapers
 by writing a JSON file instead of clicking through the UI. Generate the JSON,
-give it to the user as a `.json` file, and they load it with
-**Project file → Load project** in the app. The whole application state
+give it to the user as a `.json` file, and they load it with **Load** in the
+project bar at the top of the sidebar. The whole application state
 (layers, colors, effects, animation, canvas) lives in that one file.
 
 The app is fully offline and has no build step; the JSON is loaded and
@@ -32,6 +32,7 @@ simplest choice for agents:
 
 ```json
 {
+  "name": "My Aurora",
   "aspect": "16:9", "orientation": "landscape", "resW": 1920, "resH": 1080,
   "layers": [ { "type": "background", "...": "..." }, { "type": "pattern", "...": "..." } ]
 }
@@ -50,6 +51,7 @@ reload the page. The UI path is preferred.
 
 | Field | Type | Default | Notes |
 |---|---|---|---|
+| `name` | string | `"Untitled wallpaper"` | free-form project name, ≤ 60 chars; shown in the project bar and used for saved-file/export filenames |
 | `aspect` | string | `"16:9"` | One of `16:9, 16:10, 4:3, 5:4, 3:2, 21:9, 32:9, 1:1, 9:16, 9:19.5, 9:20` |
 | `orientation` | string | `"landscape"` | `landscape` \| `portrait` |
 | `resW`, `resH` | int | 1920 × 1080 | Export resolution in pixels, 64–8192 |
@@ -306,6 +308,7 @@ All fields optional; `0` = off. `blur`, `glowRadius`, `shadowSoft`,
 
 ```json
 {
+  "name": "Aurora study",
   "aspect": "16:9", "orientation": "landscape", "resW": 2560, "resH": 1440,
   "layers": [
     {
@@ -356,7 +359,8 @@ flattens it onto black. PNG and APNG keep true RGBA transparency.
 
 - Unknown values fall back to defaults; numbers are clamped into range.
 - Colors must be `#rgb`/`#rrggbb` strings (3/4-digit forms are expanded,
-  alpha bytes are dropped).
+  alpha bytes are dropped). The project `name` is trimmed, capped at 60
+  characters, and falls back to `"Untitled wallpaper"` when missing/blank.
 - Duplicate/missing layer ids are regenerated; exactly one background layer
   is kept and forced to the bottom; pattern layers beyond 8 are dropped.
 - Gradients need ≥ 2 stops (auto-padded), stops are sorted by `pos`.
