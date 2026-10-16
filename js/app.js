@@ -568,6 +568,95 @@
     }, 'image/png');
   }
 
+  /* ------------------------------------------------ GIF export */
+
+  let gifBusy = false;
+  async function exportGIF() {
+    if (gifBusy) return;
+    gifBusy = true;
+    const btn = $('gifBtn');
+    const orig = btn.textContent;
+    const tick = () => new Promise((r) => setTimeout(r, 0));
+    try {
+      // cap the long edge at 800px (GIF is uncompressed-ish; keep files sane)
+      const scale = Math.min(1, 800 / Math.max(P.resW, P.resH));
+      const W = Math.max(2, Math.round(P.resW * scale) & ~1);
+      const H = Math.max(2, Math.round(P.resH * scale) & ~1);
+      const p = Object.assign({}, P, { tileSize: P.tileSize * (W / P.resW) });
+      const sc = R.buildScene(p, W, H, { budget: P.animation === 'none' ? 200000 : 120000 });
+      if (!sc) { statusEl.textContent = 'GIF export failed'; return; }
+      R.colorize(sc, p);
+      const lk = makeLook();
+      const animator = R.makeAnimator(sc, p, lk);
+
+      const sceneC = document.createElement('canvas');
+      sceneC.width = W; sceneC.height = H;
+      const sctx = sceneC.getContext('2d');
+      const outC = document.createElement('canvas');
+      outC.width = W; outC.height = H;
+      const octx = outC.getContext('2d');
+      const renderAt = (t) => {
+        const overlay = animator && animator.overlayFn ? (c) => animator.overlayFn(c, t) : null;
+        if (animator && animator.perTile) {
+          sctx.clearRect(0, 0, W, H);
+          animator.frame(sctx, t);
+        }
+        FX.compose(octx, sceneC, W, H, lk, fxParams(), overlay);
+      };
+
+      // capture exactly one animation loop (seamless) when periodic;
+      // GIF delays are whole centiseconds, so pick the delay whose
+      // frames x delay x 10ms lands closest to the true period
+      const period = animator && animator.periodMs ? animator.periodMs : 0;
+      let frames = 1, delayCs = 0;
+      if (period > 0) {
+        let best = null;
+        for (let d = 3; d <= 15; d++) {
+          const f = Math.round(period / (d * 10));
+          if (f < 2 || f > 200) continue;
+          const err = Math.abs(f * d * 10 - period);
+          if (!best || err < best.err) best = { d, f, err };
+        }
+        if (!best) best = { d: 6, f: Math.max(2, Math.min(200, Math.round(period / 60))) };
+        frames = best.f; delayCs = best.d;
+      }
+
+      // one global palette from a spread of sample frames keeps colors
+      // stable across the animation (no per-frame palette flicker)
+      const nS = Math.min(frames, 12);
+      const samples = [];
+      for (let s = 0; s < nS; s++) {
+        renderAt(Math.round((s * frames) / nS) * delayCs * 10);
+        samples.push(new Uint8ClampedArray(octx.getImageData(0, 0, W, H).data));
+        await tick();
+      }
+      const pal = Gif.buildPalette(samples, 256);
+      const map = Gif.createMapper(pal);
+      const writer = new Gif.GifWriter(W, H, pal, { loop: 0 });
+      writer.start();
+      for (let i = 0; i < frames; i++) {
+        renderAt(i * delayCs * 10);
+        writer.addFrame(map(octx.getImageData(0, 0, W, H).data, W, H), delayCs);
+        if ((i & 3) === 3) {
+          btn.textContent = `${Math.round(((i + 1) / frames) * 100)}%`;
+          await tick();
+        }
+      }
+      const bytes = writer.finish();
+      const blob = new Blob([bytes], { type: 'image/gif' });
+      const famTag = P.family === 'hat' ? 'einstein' : P.family;
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `${famTag}-live-${frames}f-${W}x${H}.gif`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+      statusEl.textContent = `GIF saved · ${frames} frame${frames > 1 ? 's' : ''} · ${W}x${H} · ${(blob.size / 1048576).toFixed(1)} MB`;
+    } finally {
+      btn.textContent = orig;
+      gifBusy = false;
+    }
+  }
+
   function recordWebM(seconds) {
     if (recording) return;
     recording = true;
@@ -886,6 +975,7 @@
 
     $('randomBtn').onclick = randomize;
     $('pngBtn').onclick = exportPNG;
+    $('gifBtn').onclick = exportGIF;
     $('recordBtn').onclick = () => recordWebM(+$('recDuration').value || 10);
     $('fsBtn').onclick = fullscreen;
     $('resetBtn').onclick = () => {

@@ -4,8 +4,9 @@ Generate wallpapers from the **Einstein tile** (the aperiodic "hat" monotile dis
 in 2023 by David Smith, Joseph Samuel Myers, C. S. Kaplan and Chaim Goodman-Strauss) —
 **plus 13 more mathematically verified tiling families** — with custom palettes,
 gradient editors, visual effects and animations. Every image can be exported as a
-full-resolution PNG or recorded as a **WebM video** for live wallpapers on
-Windows or Android.
+full-resolution **PNG**, a **looping animated GIF** (encoded in the browser, plays
+anywhere without extra software), or recorded as a **WebM video** for live
+wallpapers on Windows or Android.
 
 ![screenshot](docs/screenshot.png)
 
@@ -67,8 +68,14 @@ The removed v1 animations (Cascade, Drift, Hue cycle, Pulse) are gone.
   (9:16, 9:19.5, 9:20) with standard resolutions from 720p to 4K+, plus custom
   sizes up to 8192 px.
 - Tile scale, rotation, tile gap, outline width/color, seeded randomization.
-- Full-resolution **PNG export** and **WebM recording** (MediaRecorder) including
-  all effects and animations.
+- Full-resolution **PNG export**, looping **animated GIF export** (encoded entirely
+  in the browser — no libraries, no external software needed to play it), and
+  **WebM recording** (MediaRecorder), all including every effect and animation.
+  GIF captures exactly one seamless animation loop (the encoder solves frame
+  delay × count against the true loop period), uses one global 256-color
+  palette with error-diffusion dithering, long edge capped at 800 px to keep
+  files manageable. WebM stays the compact/high-quality option; GIF plays
+  anywhere with zero codec requirements.
 - Tile budgets keep previews responsive; oversized requests are coarsened
   automatically with a status note.
 
@@ -115,6 +122,8 @@ js/palettes.js        built-in palette library + color helpers
 js/gradients.js       multi-stop gradient engine + persistence
 js/custom-palettes.js custom palette store + theme import/export
 js/effects.js         post-processing pipeline (blur/glow/shadow/grain/vignette)
+js/gif.js             dependency-free animated GIF89a encoder (median-cut
+                      palette, Floyd-Steinberg dithering, LZW, loop extension)
 js/app.js             UI wiring, settings + migration
 tests/                geometry + unit verification (see below)
 ```
@@ -131,11 +140,15 @@ bun tests/test-gradients.js
 
 # custom palette store tests (CRUD, import/export validation, migration)
 bun tests/test-palettes.js
+
+# GIF encoder tests (structure walk + LZW round-trip via an independent decoder)
+bun tests/test-gif.js
 ```
 
 `scripts/qa_studio.py` (development machine only; needs Playwright) drives the real
 UI in headless Chromium: loads the app, renders every family, edits palettes and
-gradients, applies effects, checks animation frames, and exercises PNG/WebM export.
+gradients, applies effects, checks animation frames, and exercises PNG/GIF/WebM
+export.
 
 ## Credits
 

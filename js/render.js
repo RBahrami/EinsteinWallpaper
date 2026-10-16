@@ -545,6 +545,8 @@
       const shim = buildShimLuts(look.lut);
       return {
         perTile: true,
+        // t -> sin(phase*2 - spatial); loops when phase*2 advances by 2*PI
+        periodMs: (2 * Math.PI) / (0.0022 * speed),
         frame: (ctx, t) => {
           const phase = t * 0.0011 * speed;
           paintTiles(ctx, scene, look, (tile, i) => {
@@ -564,6 +566,7 @@
       const colors = [10, 90, 170, 240].map((i) => look.lut[i]);
       return {
         overlay: true,
+        periodMs: 1 / (0.00012 * speed), // phase wraps every 1 -> seamless
         overlayFn: (ctx, t) => {
           const W = scene.W, H = scene.H;
           const th = rad(params.flowAngle == null ? 30 : params.flowAngle);
@@ -603,6 +606,7 @@
       const mode = bgLum > 0.5 ? 'soft-light' : 'lighter';
       return {
         overlay: true,
+        periodMs: 1 / (0.00009 * speed), // band pattern repeats after travel
         overlayFn: (ctx, t) => {
           const W = scene.W, H = scene.H;
           const th = rad(params.flowAngle == null ? 30 : params.flowAngle);
