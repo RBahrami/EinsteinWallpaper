@@ -22,6 +22,33 @@ const bgCfg = L.createBackground({ bg: { source: 'gradient', gradientId: 'bi-aby
 ok(bgCfg.bg.source === 'gradient' && bgCfg.bg.gradientId === 'bi-abyss' && bgCfg.opacity === 70,
   'createBackground accepts config', bgCfg.bg);
 ok(L.createBackground({ bg: { source: 'nonsense' } }).bg.source === 'solid', 'invalid bg source rejected');
+ok(L.createBackground({ bg: { source: 'palette', paletteRef: { kind: 'builtin', index: 3 } } }).bg.source === 'solid',
+  'legacy palette source converted to solid');
+
+/* ------------- background: solid/gradient only + owned gradient ------------- */
+const bgD = L.createBackground();
+ok(Array.isArray(bgD.bg.gradient) === false && typeof bgD.bg.gradient === 'object' &&
+   Array.isArray(bgD.bg.gradient.stops) && bgD.bg.gradient.stops.length >= 2,
+  'background owns a normalized gradient by default', bgD.bg.gradient);
+ok(bgD.bg.gradient.type === 'linear' && typeof bgD.bg.gradient.angle === 'number',
+  'default background gradient shape', bgD.bg.gradient);
+const badGrad = L.createBackground({ bg: {
+  source: 'gradient',
+  gradient: { type: 'spiral', angle: 9999, stops: [{ pos: 5, color: 'nope' }, { pos: -3, color: '#ABCDEF' }] },
+} });
+ok(badGrad.bg.gradient.type === 'linear' && badGrad.bg.gradient.angle === 279 &&
+   badGrad.bg.gradient.stops.length === 2 && badGrad.bg.gradient.stops[0].color === '#abcdef' &&
+   badGrad.bg.gradient.stops[1].color === '#333333',
+   'background gradient sanitized (type/angle/stops)', badGrad.bg.gradient);
+ok(L.createBackground({ bg: { gradient: null } }).bg.gradient.stops.length >= 2,
+  'missing gradient falls back to default');
+ok(L.createBackground({ bg: { gradient: { stops: [{ pos: 0, color: '#111111' }] } } }).bg.gradient.stops.length === 2,
+  'single-stop gradient padded to two');
+ok(L.createBackground({ bg: { source: 'gradient', gradientId: 'bi-solar' } }).bg.gradient === null,
+  'gradientId without owned spec stays null (seeded from library by the app)');
+ok(L.createBackground({ bg: { source: 'gradient', gradientId: 'bi-solar', gradient: { type: 'conic', angle: 15,
+  stops: [{ pos: 0, color: '#111111' }, { pos: 1, color: '#eeeeee' }] } } }).bg.gradient.type === 'conic',
+  'owned gradient wins over the gradientId hint');
 
 const pat = L.createPattern({ name: '  Waves  ' });
 ok(pat.type === 'pattern' && pat.name === 'Waves' && pat.opacity === 100, 'createPattern defaults', pat.name);
@@ -33,6 +60,10 @@ ok(L.createPattern({ tileSize: 9999, rotation: -50, seed: 0 }).tileSize === 400 
    L.createPattern({ seed: 0 }).seed === 1, 'numeric clamping (seed 0 clamps into range)');
 ok(L.createPattern({ opacity: -5 }).opacity === 0 && L.createPattern({ opacity: 300 }).opacity === 100,
   'opacity clamped to 0..100');
+ok(L.createPattern({ fillAlpha: -1 }).fillAlpha === 0 && L.createPattern({ fillAlpha: 140 }).fillAlpha === 100 &&
+   L.createPattern({}).fillAlpha === 100, 'fillAlpha clamped to 0..100 (default 100)');
+ok(L.createPattern({ lineAlpha: -1 }).lineAlpha === 0 && L.createPattern({ lineAlpha: 140 }).lineAlpha === 100 &&
+   L.createPattern({}).lineAlpha === 100, 'lineAlpha clamped to 0..100 (default 100)');
 ok(L.createPattern({ effects: { glow: 500, vignetteMode: 'light' } }).effects.vignetteMode === 'light',
   'effects sanitized', L.createPattern({ effects: { glow: 500 } }).effects);
 
@@ -89,8 +120,8 @@ const v1 = {
 const m = L.migrateV1(v1);
 ok(m.version === 2 && m.layers.length === 2, 'migration produces a v2 project');
 ok(m.layers[0].type === 'background' && m.layers[1].type === 'pattern', 'migrated stack order');
-ok(m.layers[0].bg.source === 'palette' &&
-   m.layers[0].bg.paletteRef.index === 3, 'v1 theme background -> explicit bg palette ref', m.layers[0].bg);
+ok(m.layers[0].bg.source === 'solid' &&
+   m.layers[0].bg.legacyPaletteRef.index === 3, 'v1 theme background -> solid + legacy palette ref', m.layers[0].bg);
 ok(m.layers[1].opacity === 62, 'v1 fgAlpha -> pattern layer opacity', m.layers[1].opacity);
 ok(m.layers[1].family === 'hat' && m.layers[1].variant === 'P' && m.layers[1].tileSize === 40 &&
    m.layers[1].rotation === 45 && m.layers[1].gap === 0.03 && m.layers[1].seed === 42,
@@ -106,16 +137,16 @@ ok(m.aspect === '16:10' && m.resW === 1680 && m.resH === 1050, 'global canvas se
 const m2 = L.migrateV1(Object.assign({}, v1, { bgSource: 'gradient', gradientId: 'bi-solar' }));
 ok(m2.layers[0].bg.source === 'gradient' && m2.layers[0].bg.gradientId === 'bi-solar',
   'v1 gradient background -> background layer gradient', m2.layers[0].bg);
-// solid background migration (single mode)
-const m3 = L.migrateV1(Object.assign({}, v1, {
-  themeMode: 'single', bgSource: 'custom', bgColor: '#244824',
-}));
-ok(m3.layers[0].bg.source === 'solid' && m3.layers[0].bg.color === '#244824',
-  'v1 solid background -> background layer color', m3.layers[0].bg);
 // legacy numeric palette + missing fields
 const m4 = L.migrateV1({ family: 'hexagons', palette: 5, colorMode: 'checker' });
 ok(m4.layers[1].theme.paletteRef.index === 5, 'legacy numeric palette ref migrated');
 ok(m4.layers[1].opacity === 100, 'missing fgAlpha migrates to 100');
+ok(m4.layers[1].fillAlpha === 100 && m4.layers[1].lineAlpha === 100,
+  'missing fill/line alpha migrate to 100');
+// legacy palette background keeps its reference for the app to resolve
+const m5 = L.migrateV1(Object.assign({}, JSON.parse(JSON.stringify(v1))));
+ok(m5.layers[0].bg.source === 'solid' && m5.layers[0].bg.legacyPaletteRef.index === 3,
+  'v1 palette background keeps a resolvable reference');
 
 /* ---------------- sanitizer ---------------- */
 ok(JSON.stringify(L.sanitizeProject(null)) === JSON.stringify(L.defaultProject()) ||
@@ -156,6 +187,37 @@ const many = { version: 2, layers: [{ type: 'background' }] };
 for (let i = 0; i < 12; i++) many.layers.push({ type: 'pattern', name: 'P' + i });
 const trimmed = L.sanitizeProject(many);
 ok(trimmed.layers.length === 1 + L.MAX_PATTERN_LAYERS, 'pattern layer cap enforced', trimmed.layers.length);
+
+// bare v2 project (no version field — agent-generated files)
+const bare = {
+  resW: 1024, resH: 768,
+  layers: [
+    { type: 'background', bg: { source: 'gradient', gradient: { type: 'radial', angle: 0,
+      stops: [{ pos: 0, color: '#ffffff' }, { pos: 1, color: '#000000' }] } } },
+    { type: 'pattern', name: 'Agent', fillAlpha: 60, lineAlpha: 20, theme: { mode: 'single', singleColor: '#ff0000' } },
+  ],
+};
+const bareFix = L.sanitizeProject(bare);
+ok(bareFix.version === 2 && bareFix.resW === 1024 && bareFix.layers.length === 2,
+  'bare v2 project (no version) accepted', bareFix);
+ok(bareFix.layers[0].bg.bg === undefined && bareFix.layers[0].bg.gradient.type === 'radial' &&
+   bareFix.layers[0].bg.gradient.stops.length === 2,
+  'agent background gradient preserved through sanitize', bareFix.layers[0].bg.gradient);
+ok(bareFix.layers[1].fillAlpha === 60 && bareFix.layers[1].lineAlpha === 20,
+  'agent fill/line alpha preserved', [bareFix.layers[1].fillAlpha, bareFix.layers[1].lineAlpha]);
+
+// v2 layer with legacy palette background source -> solid + resolvable ref
+const v2pal = L.sanitizeProject({ version: 2, layers: [
+  { type: 'background', bg: { source: 'palette', paletteRef: { kind: 'builtin', index: 2 } } },
+  { type: 'pattern' },
+] });
+ok(v2pal.layers[0].bg.source === 'solid' && v2pal.layers[0].bg.legacyPaletteRef.index === 2,
+  'v2 palette background converts to solid + legacy ref', v2pal.layers[0].bg);
+
+// duplicate copies fill/line alpha
+src.fillAlpha = 44; src.lineAlpha = 88;
+const dup2 = L.duplicateLayer(src);
+ok(dup2.fillAlpha === 44 && dup2.lineAlpha === 88, 'duplicate copies fill/line alpha');
 
 /* ---------------- planLoop ---------------- */
 const one = L.planLoop([8333]);

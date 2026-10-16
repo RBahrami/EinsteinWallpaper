@@ -5,24 +5,30 @@
  * Only canvas dimensions / aspect / resolution are global; every visual
  * setting lives on a layer:
  *
- *   Background layer (always layers[0], can never be deleted or reordered):
+ *   Background layer (always layers[0], can never be deleted or reordered).
+ *     Fill = solid color OR gradient; the gradient is an OWNED full-spec
+ *     object (type linear/radial/conic, angle, sorted color stops) edited
+ *     live in the Background layer section:
  *     { id, type:'background', name:'Background', visible, opacity,
- *       bg: { source:'solid'|'gradient'|'palette',
- *             color, gradientId, paletteRef } }
+ *       bg: { source:'solid'|'gradient', color, gradientId?, gradient } }
+ *     gradientId is only a legacy/migration hint; rendering uses bg.gradient.
+ *     A legacy 'palette' source is converted to solid (legacyPaletteRef is
+ *     resolved to a concrete color by app.js, which owns the palette lib).
  *
  *   Pattern layers (up to MAX_PATTERN_LAYERS, stacked above the background):
  *     { id, type:'pattern', name, visible, opacity,
  *       family, variant, tileSize, rotation, panX, panY,
- *       gap, outlineWidth, lineAuto, lineColor, seed,
+ *       gap, outlineWidth, fillAlpha, lineAlpha, lineAuto, lineColor, seed,
  *       theme: { mode, colorMap, gradMap, duoMap, gradBands, singleColor,
  *                duoA, duoB, paletteRef, gradientId },
  *       animation, animSpeed, flowAngle, effects: {...} }
+ *     fillAlpha / lineAlpha (0..100) control the per-tile FILL and
+ *     BORDER/STROKE transparency independently of the whole-layer opacity.
  *
  * migrateV1() converts the legacy flat einstein-wallpaper-v1 settings into a
  * v2 project without losing palettes/gradients/templates (those live in their
  * own stores): background source -> Background layer, fgAlpha -> pattern
  * layer opacity, everything else -> the first Pattern layer.
- *
  * planLoop() computes a seamless combined export loop for layers whose
  * animation periods differ: the slowest layer defines the loop T; every
  * faster layer is given an integer number of cycles inside T (a per-layer
@@ -42,8 +48,14 @@
   };
   const THEME_MODES = ['single', 'palette', 'gradient', 'duotone'];
   const ANIMS = ['none', 'shimmer', 'flow', 'glowwave'];
-  const BG_SOURCES = ['solid', 'gradient', 'palette'];
+  const BG_SOURCES = ['solid', 'gradient'];
   const HEX_RE = /^#[0-9a-f]{6}$/i;
+  const GRAD_TYPES = ['linear', 'radial', 'conic'];
+  // Seed gradient for a Background layer that has none (Abyss-like)
+  const DEFAULT_BG_GRADIENT = {
+    type: 'linear', angle: 120,
+    stops: [{ pos: 0, color: '#05060e' }, { pos: 0.6, color: '#232b52' }, { pos: 1, color: '#6d7fd0' }],
+  };
 
   /* ---------------- small helpers ---------------- */
   function uid() {
@@ -67,6 +79,21 @@
     if (r.kind === 'custom' && typeof r.id === 'string' && r.id) return { kind: 'custom', id: r.id };
     return { kind: 'builtin', index: clampInt(r.index, 0, 999, 0) };
   }
+  // Full gradient-spec sanitizer (dependency-free twin of Gradients.normalize
+  // so layers.js keeps loading in Node/bun without the browser libraries).
+  function normGradient(g) {
+    const src = (g && typeof g === 'object') ? g : {};
+    const stops = (Array.isArray(src.stops) ? src.stops : [])
+      .map((s) => ({ pos: clampNum(s && s.pos, 0, 1, 0), color: hex(s && s.color, '#333333') }))
+      .sort((a, b) => a.pos - b.pos);
+    if (!stops.length) stops.push({ pos: 0, color: '#333333' }, { pos: 1, color: '#cccccc' });
+    if (stops.length === 1) stops.push({ pos: 1, color: stops[0].color });
+    return {
+      type: GRAD_TYPES.includes(src.type) ? src.type : 'linear',
+      angle: ((Math.round(+src.angle) || 0) % 360 + 360) % 360,
+      stops,
+    };
+  }
   function sanitizeFx(fx) {
     const out = Object.assign({}, FX_DEFAULTS);
     if (fx && typeof fx === 'object') {
@@ -85,6 +112,17 @@
   function createBackground(cfg) {
     cfg = cfg || {};
     const bg = (cfg.bg && typeof cfg.bg === 'object') ? cfg.bg : {};
+    // legacy 'palette' fill -> solid color (the referenced palette's bg color
+    // is resolved by app.js fixProjectRefs, which owns the palette library)
+    const legacyPalette = bg.source === 'palette' ? validPaletteRef(bg.paletteRef) : null;
+    const source = BG_SOURCES.includes(bg.source) ? bg.source : 'solid';
+    // An owned gradient is authored inline. When only a library gradientId is
+    // given (v1/v2 migrations, agent files), gradient stays null and app.js
+    // fixProjectRefs seeds the owned spec from that library template.
+    const gradient = bg.gradient
+      ? normGradient(bg.gradient)
+      : (source === 'gradient' && bg.gradientId) ? null
+      : normGradient(DEFAULT_BG_GRADIENT);
     return {
       id: (typeof cfg.id === 'string' && cfg.id) ? cfg.id : uid(),
       type: 'background',
@@ -92,10 +130,11 @@
       visible: cfg.visible !== false,
       opacity: clampInt(cfg.opacity, 0, 100, 100),
       bg: {
-        source: BG_SOURCES.includes(bg.source) ? bg.source : 'solid',
+        source,
         color: hex(bg.color, '#0b1020'),
         gradientId: (typeof bg.gradientId === 'string' && bg.gradientId) ? bg.gradientId : null,
-        paletteRef: validPaletteRef(bg.paletteRef),
+        gradient,
+        ...(legacyPalette ? { legacyPaletteRef: legacyPalette } : {}),
       },
     };
   }
@@ -119,6 +158,8 @@
       panY: clampNum(cfg.panY, -4000, 4000, 0),
       gap: clampNum(cfg.gap, 0, 0.4, 0.02),
       outlineWidth: clampNum(cfg.outlineWidth, 0, 20, 1.2),
+      fillAlpha: clampInt(cfg.fillAlpha, 0, 100, 100),
+      lineAlpha: clampInt(cfg.lineAlpha, 0, 100, 100),
       lineAuto: cfg.lineAuto !== false,
       lineColor: hex(cfg.lineColor, '#101014'),
       seed: clampInt(cfg.seed, 1, 99999, 7),
@@ -205,9 +246,15 @@
     if (src === 'gradient') {
       bg.bg.source = 'gradient';
       bg.bg.gradientId = (typeof s.gradientId === 'string' && s.gradientId) ? s.gradientId : null;
+      // drop the default owned spec: app.js fixProjectRefs seeds the real
+      // gradient from the referenced library template
+      bg.bg.gradient = null;
     } else if (src === 'theme') {
-      bg.bg.source = 'palette';
-      bg.bg.paletteRef = validPaletteRef(s.paletteRef);
+      // palette-derived background -> solid; the concrete color is resolved
+      // from the referenced palette by app.js fixProjectRefs
+      bg.bg.source = 'solid';
+      bg.bg.color = hex(s.bgColor, '#0b1020');
+      bg.bg.legacyPaletteRef = validPaletteRef(s.paletteRef);
     } else {
       bg.bg.source = 'solid';
       bg.bg.color = hex(s.bgColor, '#0b1020');
@@ -236,6 +283,7 @@
         paletteRef: palRef,
         gradientId: s.gradientId,
       },
+      fillAlpha: s.fillAlpha, lineAlpha: s.lineAlpha,
       animation: s.animation, animSpeed: s.animSpeed, flowAngle: s.flowAngle,
       effects: s.effects,
     });
@@ -249,7 +297,11 @@
   /* ---------------- defensive project sanitizer ---------------- */
   function sanitizeProject(raw) {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return defaultProject();
-    if (raw.version !== 2) {
+    // v2 shape: explicit version, or a bare project object carrying a layers
+    // array (agent-generated files may omit the version field)
+    const looksV2 = raw.version === 2 ||
+      (Array.isArray(raw.layers) && !raw.family && !raw.themeMode && !raw.colorMode);
+    if (!looksV2) {
       // legacy flat settings (v1) or unknown shape
       if (typeof raw.family === 'string' || raw.themeMode || raw.colorMode) return migrateV1(raw);
       return defaultProject();
@@ -332,7 +384,8 @@
 
   root.Layers = {
     MAX_PATTERN_LAYERS, FX_DEFAULTS, THEME_MODES, ANIMS,
-    uid, clampInt, clampNum, hex, validPaletteRef, sanitizeFx,
+    uid, clampInt, clampNum, hex, validPaletteRef, sanitizeFx, normGradient,
+    DEFAULT_BG_GRADIENT,
     createBackground, createPattern, defaultProject,
     bgLayer, patternLayers, findLayer, selectedLayer,
     duplicateLayer, deleteLayer, moveLayer,

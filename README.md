@@ -40,12 +40,19 @@ The studio is a **layer compositor**. The **Layers panel** manages the stack:
 
 - A dedicated **Background layer** always sits at the bottom of the stack — it
   cannot be deleted, duplicated or reordered, and it holds the wallpaper fill:
-  solid color, any gradient, or a **palette-derived color via an explicit palette
-  reference** (recoloring a pattern layer never silently moves the background).
+  a **solid color or a fully editable gradient** (type: linear / radial / conic,
+  angle, and an unlimited stop list with color + position + live preview;
+  gradient templates seed the editor and can be customized afterwards).
+  Recoloring a pattern layer never silently moves the background.
 - Up to **8 Pattern layers**, each with a full, independent configuration:
-  tiling family + variant, tile scale, rotation, gap, outline, color theme mode
+  tiling family + variant, tile scale, rotation, gap, color theme mode
   (Single / Palette / Gradient / Duotone with arrangements, templates and
   editors), visual effects, animation (effect, speed, direction) and seed.
+- **Independent fill & border paint per layer:** tile **fill transparency**
+  (`fillAlpha`) and tile **border transparency** (`lineAlpha`) are separate
+  sliders, on top of the border color (automatic or manual) — wireframe, ghost
+  and outline-only looks are one slider away. For the Lines family the fill
+  slider is hidden and the border slider drives the line itself.
 - Add, **duplicate** (copies every setting, assigns a fresh ID), rename,
   delete and **reorder** pattern layers; toggle each layer's visibility and
   adjust its **opacity 0–100%**.
@@ -146,7 +153,7 @@ The removed v1 animations (Cascade, Drift, Hue cycle, Pulse) are gone.
 - Tile budgets keep previews responsive; oversized requests are coarsened
   automatically with a status note.
 
-### Persistence
+### Persistence & project files
 The whole **project** — global canvas settings plus every layer's order,
 visibility, opacity, selection and configuration — persists in `localStorage`
 (`einstein-wallpaper-v2`) with defensive validation (missing/corrupt layers are
@@ -159,6 +166,15 @@ single-color templates in `ew-single-templates-v1` and duotone pairs in
 `ew-duo-templates-v1` — all with stable IDs and defensive parsing.
 **Randomize** acts on the selected layer (the status bar says which);
 **Reset** restores the whole default project.
+
+**Project file (save/load as JSON):** *Project file → Save project* downloads
+the entire project — all layers plus every custom palette, gradient and
+template — as one self-contained JSON file; *Load project* restores it on any
+machine. Agents can **generate wallpapers by writing that JSON** themselves:
+[docs/AGENT_GUIDE.md](docs/AGENT_GUIDE.md) documents every field, all built-in
+palette/gradient references, and includes ready-to-adapt examples (minimal,
+multi-layer, transparent). Loader accepts the full wrapper, a bare project
+object, and legacy v1 settings.
 
 ## Quick start
 
@@ -210,8 +226,11 @@ js/gif.js             dependency-free animated GIF89a encoder (median-cut
                       palette, Floyd-Steinberg dithering, LZW, loop extension)
 js/apng.js            dependency-free lossless APNG encoder (CRC32 chunks,
                       adaptive PNG filtering, DEFLATE + stored fallback)
-js/app.js             UI wiring, layer compositor, caches, exports, persistence
+js/app.js             UI wiring, layer compositor, caches, exports, persistence,
+                      project-file save/load (JSON)
 tests/                geometry + unit verification (see below)
+docs/AGENT_GUIDE.md   JSON project-format reference for agents: generate a
+                      wallpaper by writing the project JSON and loading it
 ```
 
 ## Verification
@@ -237,7 +256,8 @@ bun tests/test-apng.js
 bun tests/test-theme.js
 
 # layer model tests (factories, background protection, duplication,
-# reordering, v1 migration, sanitizer, export-loop planning)
+# reordering, v1 migration, sanitizer, owned background gradients,
+# fill/line alpha, export-loop planning)
 bun tests/test-layers.js
 ```
 

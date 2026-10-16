@@ -100,10 +100,15 @@
   let project = loadProject();
 
   function loadProject() {
-    // 1) a saved v2 project wins
+    // 1) a saved v2 project wins; persist the sanitized form immediately so
+    //    conversions (e.g. legacy palette background) stick without any edit
     try {
       const raw = localStorage.getItem(STORE_V2);
-      if (raw) return fixProjectRefs(LT.sanitizeProject(JSON.parse(raw)));
+      if (raw) {
+        const proj = fixProjectRefs(LT.sanitizeProject(JSON.parse(raw)));
+        try { localStorage.setItem(STORE_V2, JSON.stringify(proj)); } catch (e) { /* ignore */ }
+        return proj;
+      }
     } catch (e) { /* fall through */ }
     // 2) migrate the legacy flat v1 settings (keeps palette/gradient refs);
     //    persist the migration immediately so it sticks without any edit
@@ -124,7 +129,18 @@
       if (!layer.theme.gradientId) layer.theme.gradientId = GR.BUILTINS[0].id;
     }
     const bg = LT.bgLayer(proj);
-    if (bg.bg.gradientId && !GR.find(bg.bg.gradientId)) bg.bg.gradientId = GR.BUILTINS[0].id;
+    if (bg.bg.gradientId && !GR.find(bg.bg.gradientId)) bg.bg.gradientId = null;
+    // seed the owned background gradient from its template when missing
+    // (v1/v2 migrations and agent files may reference a library gradient)
+    if (!bg.bg.gradient) {
+      const src = bg.bg.gradientId ? GR.find(bg.bg.gradientId) : null;
+      bg.bg.gradient = LT.normGradient(src || LT.DEFAULT_BG_GRADIENT);
+    }
+    // legacy palette-derived background -> concrete solid color
+    if (bg.bg.legacyPaletteRef) {
+      try { bg.bg.color = PAL.get(bg.bg.legacyPaletteRef).bg; } catch (e) { /* keep */ }
+      delete bg.bg.legacyPaletteRef;
+    }
     return proj;
   }
 
@@ -207,15 +223,13 @@
 
   /* ------------------------------------------- background layer fill */
 
-  // Resolved fill spec of the Background layer (explicit reference — it
-  // never depends on which pattern layer happens to be selected).
+  // Resolved fill spec of the Background layer (explicit — it never depends
+  // on which pattern layer happens to be selected). Fill is a solid color or
+  // the layer's OWN fully-editable gradient object.
   function bgFillSpec() {
     const b = LT.bgLayer(project).bg;
     if (b.source === 'gradient') {
-      return { kind: 'gradient', grad: GR.find(b.gradientId) || GR.BUILTINS[0] };
-    }
-    if (b.source === 'palette') {
-      return { kind: 'solid', color: PAL.get(b.paletteRef).bg };
+      return { kind: 'gradient', grad: b.gradient || GR.find(b.gradientId) || GR.BUILTINS[0] };
     }
     return { kind: 'solid', color: b.color };
   }
@@ -235,8 +249,7 @@
     return spec.kind === 'gradient' ? GR.sample(spec.grad, 0.5) : spec.color;
   }
   function bgSourceLabel(layer) {
-    return layer.bg.source === 'gradient' ? 'gradient'
-      : layer.bg.source === 'palette' ? 'palette' : 'solid';
+    return layer.bg.source === 'gradient' ? 'gradient' : 'solid';
   }
 
   /* ------------------------------------------- color theme helpers */
@@ -335,6 +348,7 @@
       d.pal.active ? JSON.stringify(d.pal.draft) : '',
       d.grad.active ? JSON.stringify(d.grad.draft) : '',
       layer.lineAuto, layer.lineColor, layer.gap, layer.outlineWidth,
+      layer.fillAlpha, layer.lineAlpha,
       layer.animation, layer.animSpeed, layer.flowAngle,
       effectiveBgColor()].join('|');
   }
@@ -377,6 +391,10 @@
     const palOutline = pal && pal.outline != null ? pal.outline : null;
     const line = layer.lineAuto ? (palOutline || PAL.autoLineColor(effectiveBgColor())) : layer.lineColor;
     const look = { lut, line, bg: effectiveBgColor(), gap: layer.gap, outlineWidth: layer.outlineWidth, alpha: 1 };
+    // per-tile fill vs border transparency (independent of layer opacity,
+    // which is applied later at composite time to the whole layer)
+    look.fillAlpha = Math.max(0, Math.min(1, (layer.fillAlpha == null ? 100 : layer.fillAlpha) / 100));
+    look.lineAlpha = Math.max(0, Math.min(1, (layer.lineAlpha == null ? 100 : layer.lineAlpha) / 100));
     // for the single-layer fast path (FX.compose paints the background from
     // the look) carry the real background fill when it is a gradient
     const spec = bgFillSpec();
@@ -1070,6 +1088,58 @@
     }
   }
 
+  /* ------------------------------------------------ project file IO */
+
+  // Self-contained project file: the v2 project plus every custom library
+  // (palettes/gradients/templates) so nothing is lost on another machine.
+  // Agents can generate just the `project` object — see docs/AGENT_GUIDE.md.
+  function buildProjectFile() {
+    return {
+      type: 'einstein-wallpaper-project',
+      version: 2,
+      saved: new Date().toISOString(),
+      project: JSON.parse(JSON.stringify(project)),
+      libraries: {
+        palettes: CP.list(),
+        gradients: GR.list(),
+        extras: { single: singleStore.list(), duo: duoStore.list() },
+      },
+    };
+  }
+  // Accepts: full project files ({type, project}), bare v2 projects
+  // ({version: 2, layers}), and legacy flat v1 settings.
+  function extractProject(data) {
+    if (data && typeof data === 'object' && !Array.isArray(data)) {
+      if (data.project && typeof data.project === 'object' && !Array.isArray(data.project)) return data.project;
+      if (Array.isArray(data.layers) || data.version === 2 ||
+          typeof data.family === 'string' || data.themeMode || data.colorMode) return data;
+    }
+    throw new Error('no project data found in file');
+  }
+  function loadProjectFromText(text) {
+    let data;
+    try { data = JSON.parse(text); } catch (e) { throw new Error('not a valid JSON file'); }
+    if (data && typeof data === 'object' && data.libraries && typeof data.libraries === 'object') {
+      const libs = data.libraries;
+      if (Array.isArray(libs.palettes) && libs.palettes.length) CP.replaceAll(libs.palettes);
+      if (Array.isArray(libs.gradients) && libs.gradients.length) GR.replaceAll(libs.gradients);
+      if (libs.extras && typeof libs.extras === 'object') {
+        if (Array.isArray(libs.extras.single)) libs.extras.single.forEach((c) => {
+          if (GR.isHexColor(c) && !singleStore.list().includes(c)) singleStore.add(c);
+        });
+        if (Array.isArray(libs.extras.duo)) libs.extras.duo.forEach((p) => {
+          if (p && GR.isHexColor(p.a) && GR.isHexColor(p.b) && !duoStore.list().some((q) => q.a === p.a && q.b === p.b)) duoStore.add(p);
+        });
+      }
+    }
+    project = fixProjectRefs(LT.sanitizeProject(extractProject(data)));
+    cache.clear();
+    drafts.clear();
+    save(); syncControls(); refresh();
+    notice('Project loaded · ' + LT.patternLayers(project).length +
+      ' pattern layer' + (LT.patternLayers(project).length > 1 ? 's' : ''));
+  }
+
   /* ------------------------------------------------ randomize/reset */
 
   function randomize() {
@@ -1077,16 +1147,11 @@
     const layer = SL();
     if (!layer) return;
     if (layer.type === 'background') {
-      const src = ['solid', 'gradient', 'palette'][Math.floor(rr() * 3)];
+      const src = rr() < 0.5 ? 'solid' : 'gradient';
       layer.bg.source = src;
       if (src === 'gradient') {
         const all = GR.all();
-        layer.bg.gradientId = all[Math.floor(rr() * all.length)].id;
-      } else if (src === 'palette') {
-        const nC = CP.count();
-        layer.bg.paletteRef = (nC && rr() < 0.25)
-          ? { kind: 'custom', id: CP.list()[Math.floor(rr() * nC)].id }
-          : { kind: 'builtin', index: Math.floor(rr() * PAL.LIST.length) };
+        seedBgGradient(all[Math.floor(rr() * all.length)].id);
       } else {
         const vivid = ['#0b1020', '#071018', '#1a0e14', '#0e1a12', '#241432', '#10141c'];
         layer.bg.color = vivid[Math.floor(rr() * vivid.length)];
@@ -1125,6 +1190,8 @@
       layer.theme.singleColor = vivid[Math.floor(rr() * vivid.length)];
     }
     layer.opacity = rr() < 0.8 ? 100 : 55 + Math.round(rr() * 40);
+    layer.fillAlpha = rr() < 0.9 ? 100 : 35 + Math.round(rr() * 65);
+    layer.lineAlpha = rr() < 0.9 ? 100 : 35 + Math.round(rr() * 65);
     layer.animation = ['none', 'shimmer', 'flow', 'glowwave'][Math.floor(rr() * 4)];
     layer.flowAngle = Math.floor(rr() * 24) * 15;
     layer.rotation = Math.floor(rr() * 24) * 15;
@@ -1395,6 +1462,11 @@
     const isLine = layer.family === 'lines';
     $('gapRow').style.display = isLine ? 'none' : '';
     $('outlineRow').style.display = isLine ? 'none' : '';
+    // line patterns are pure strokes: no fills, so the fill slider is hidden
+    // and the border slider drives the line alpha
+    $('fillAlphaRow').style.display = isLine ? 'none' : '';
+    $('lineAlphaRow').style.display = '';
+    $('lineAlphaLabel').firstChild.nodeValue = isLine ? 'Line transparency ' : 'Border transparency ';
   }
 
   function syncAnimVisibility(layer) {
@@ -1404,40 +1476,77 @@
 
   /* -------------------------------------- background layer controls */
 
-  function buildBgPalGrid(layer) {
-    const grid = $('bgPalGrid');
-    grid.innerHTML = '';
-    const mk = (pal, ref) => {
-      const b = document.createElement('button');
-      const on = sameRef(layer.bg.paletteRef, ref);
-      b.className = 'swatch' + (on ? ' on' : '');
-      b.title = pal.name + (ref.kind === 'custom' ? ' (custom)' : '');
-      b.style.background = `linear-gradient(135deg, ${pal.colors.join(',')})`;
-      b.style.borderColor = on ? '#fff' : 'rgba(255,255,255,.15)';
-      b.onclick = () => {
-        layer.bg.paletteRef = ref;
-        save(); syncControls(); recolorAll();
+  // The Background layer owns a FULL gradient spec (type/angle/stops) that
+  // is edited live in place. bg.gradientId records the library template the
+  // spec was last seeded from ("Reset edits" re-copies it).
+  function seedBgGradient(id) {
+    const bg = LT.bgLayer(project).bg;
+    const src = id ? GR.find(id) : null;
+    bg.gradientId = src ? id : null;
+    bg.gradient = LT.normGradient(src ? JSON.parse(JSON.stringify(src)) : LT.DEFAULT_BG_GRADIENT);
+  }
+  function renderBgGradEditor() {
+    const bg = LT.bgLayer(project).bg;
+    const g = bg.gradient || LT.normGradient(LT.DEFAULT_BG_GRADIENT);
+    fillSelect($('bgGradType'), [['linear', 'Linear'], ['radial', 'Radial'], ['conic', 'Conic']], g.type);
+    $('bgGradAngle').value = g.angle;
+    $('bgGradAngleVal').textContent = g.angle + '°';
+    $('bgGradStopCount').textContent = g.stops.length + ' stops';
+    $('bgGradState').textContent = bg.gradientId ?
+      ((GR.find(bg.gradientId) || {}).name || '') : 'edited';
+    const list = $('bgGradStops');
+    list.innerHTML = '';
+    g.stops.forEach((s, i) => {
+      const row = document.createElement('div');
+      row.className = 'stoprow';
+      const col = document.createElement('input');
+      col.type = 'color'; col.value = s.color;
+      col.oninput = () => {
+        bg.gradient.stops[i].color = col.value;
+        save(); renderBgGradPreview(); recolorAll();
       };
-      return b;
-    };
-    PAL.LIST.forEach((palB, i) => grid.appendChild(mk(palB, { kind: 'builtin', index: i })));
-    const customs = CP.list();
-    if (customs.length) {
-      const sep = document.createElement('div');
-      sep.className = 'swatch-sep';
-      grid.appendChild(sep);
-      for (const p of customs) grid.appendChild(mk(p, { kind: 'custom', id: p.id }));
-    }
+      const pos = document.createElement('input');
+      pos.type = 'number'; pos.min = 0; pos.max = 100; pos.step = 1;
+      pos.value = Math.round(s.pos * 100);
+      pos.className = 'postext';
+      pos.onchange = () => {
+        bg.gradient.stops[i].pos = Math.max(0, Math.min(100, +pos.value || 0)) / 100;
+        bg.gradient.stops.sort((a, b) => a.pos - b.pos);
+        save(); renderBgGradEditor(); recolorAll();
+      };
+      const del = document.createElement('button');
+      del.className = 'mini-btn'; del.textContent = '×'; del.title = 'Remove stop';
+      del.onclick = () => {
+        if (bg.gradient.stops.length > 2) {
+          bg.gradient.stops.splice(i, 1);
+          save(); renderBgGradEditor(); recolorAll();
+        }
+      };
+      row.append(col, pos, del);
+      list.appendChild(row);
+    });
+    renderBgGradPreview();
+  }
+  function renderBgGradPreview() {
+    const bg = LT.bgLayer(project).bg;
+    const grad = bg.gradient || LT.normGradient(LT.DEFAULT_BG_GRADIENT);
+    const cv = $('bgGradPreview');
+    const w = cv.parentElement ? (cv.parentElement.clientWidth || 260) : 260;
+    cv.width = w; cv.height = 26;
+    const ctx = cv.getContext('2d');
+    ctx.clearRect(0, 0, cv.width, cv.height);
+    const g = GR.toCanvas(ctx, grad, cv.width, cv.height, 0);
+    if (g && g.conic) GR.fillConic(ctx, grad, cv.width, cv.height);
+    else { ctx.fillStyle = g; ctx.fillRect(0, 0, cv.width, cv.height); }
   }
 
   function syncBackgroundControls(layer) {
     $('bgFillSource').value = layer.bg.source;
     $('bgFillColor').value = layer.bg.color;
-    fillGradientSelect($('bgFillGradient'), layer.bg.gradientId || GR.BUILTINS[0].id);
-    buildBgPalGrid(layer);
+    fillGradientSelect($('bgGradTpl'), layer.bg.gradientId || '');
     $('bgSolidRow').style.display = layer.bg.source === 'solid' ? '' : 'none';
-    $('bgGradRow').style.display = layer.bg.source === 'gradient' ? '' : 'none';
-    $('bgPalRow').style.display = layer.bg.source === 'palette' ? '' : 'none';
+    $('bgGradEditor').style.display = layer.bg.source === 'gradient' ? '' : 'none';
+    if (layer.bg.source === 'gradient') renderBgGradEditor();
   }
 
   function setSlider(id, valId, v, fmt) {
@@ -1454,7 +1563,9 @@
     setSlider('tileSize', 'tileSizeVal', layer.tileSize, (v) => v + ' px');
     setSlider('rotation', 'rotationVal', layer.rotation, (v) => v + '°');
     setSlider('gap', 'gapVal', Math.round(layer.gap * 100), (v) => v + '%');
+    setSlider('fillAlpha', 'fillAlphaVal', layer.fillAlpha == null ? 100 : layer.fillAlpha, (v) => v + '%');
     setSlider('outlineWidth', 'outlineWidthVal', layer.outlineWidth, (v) => (+v).toFixed(1) + ' px');
+    setSlider('lineAlpha', 'lineAlphaVal', layer.lineAlpha == null ? 100 : layer.lineAlpha, (v) => v + '%');
     setSlider('animSpeed', 'animSpeedVal', layer.animSpeed, (v) => (+v).toFixed(1) + '×');
     setSlider('flowAngle', 'flowAngleVal', layer.flowAngle, (v) => v + '°');
     setSlider('seed', 'seedVal', layer.seed, (v) => '#' + v);
@@ -1548,7 +1659,7 @@
     $('bgFillSource').onchange = (e) => {
       const l = SL();
       if (!l || l.type !== 'background') return;
-      l.bg.source = e.target.value;
+      l.bg.source = e.target.value === 'gradient' ? 'gradient' : 'solid';
       save(); syncControls(); recolorAll();
     };
     $('bgFillColor').oninput = (e) => {
@@ -1557,18 +1668,42 @@
       l.bg.color = e.target.value;
       save(); recolorAll();
     };
-    $('bgFillGradient').onchange = (e) => {
-      const l = SL();
-      if (!l || l.type !== 'background') return;
-      l.bg.gradientId = e.target.value;
-      save(); recolorAll();
+    // background gradient editor (owned full gradient spec, live edits)
+    $('bgGradTpl').onchange = (e) => {
+      seedBgGradient(e.target.value);
+      save(); syncControls(); recolorAll();
+    };
+    $('bgGradType').onchange = (e) => {
+      const bg = LT.bgLayer(project).bg;
+      bg.gradient.type = e.target.value;
+      save(); renderBgGradEditor(); recolorAll();
+    };
+    $('bgGradAngle').oninput = (e) => {
+      const bg = LT.bgLayer(project).bg;
+      bg.gradient.angle = ((Math.round(+e.target.value) || 0) % 360 + 360) % 360;
+      $('bgGradAngleVal').textContent = bg.gradient.angle + '°';
+      save(); renderBgGradPreview(); recolorAll();
+    };
+    $('bgGradAddStop').onclick = () => {
+      const bg = LT.bgLayer(project).bg;
+      if (bg.gradient.stops.length < 16) {
+        bg.gradient.stops.push({ pos: 1, color: '#88aacc' });
+        bg.gradient.stops.sort((a, b) => a.pos - b.pos);
+        save(); renderBgGradEditor(); recolorAll();
+      }
+    };
+    $('bgGradDraftReset').onclick = () => {
+      seedBgGradient(LT.bgLayer(project).bg.gradientId);
+      save(); syncControls(); recolorAll();
     };
 
     // ---- tiling (selected pattern layer) ----
     $('tileSize').oninput = (e) => { const l = SP(); l.tileSize = +e.target.value; $('tileSizeVal').textContent = l.tileSize + ' px'; refresh(); save(); };
     $('rotation').oninput = (e) => { const l = SP(); l.rotation = +e.target.value; $('rotationVal').textContent = l.rotation + '°'; refresh(); save(); };
     $('gap').oninput = (e) => { const l = SP(); l.gap = e.target.value / 100; $('gapVal').textContent = e.target.value + '%'; recolor(l); save(); };
+    $('fillAlpha').oninput = (e) => { const l = SP(); l.fillAlpha = Math.max(0, Math.min(100, Math.round(+e.target.value || 0))); $('fillAlphaVal').textContent = l.fillAlpha + '%'; recolor(l); save(); };
     $('outlineWidth').oninput = (e) => { const l = SP(); l.outlineWidth = +e.target.value; $('outlineWidthVal').textContent = (+e.target.value).toFixed(1) + ' px'; recolor(l); save(); };
+    $('lineAlpha').oninput = (e) => { const l = SP(); l.lineAlpha = Math.max(0, Math.min(100, Math.round(+e.target.value || 0))); $('lineAlphaVal').textContent = l.lineAlpha + '%'; recolor(l); save(); };
     $('seed').oninput = (e) => { const l = SP(); l.seed = +e.target.value || 1; $('seedVal').textContent = '#' + l.seed; refresh(); save(); };
     $('animSpeed').oninput = (e) => { const l = SP(); l.animSpeed = +e.target.value; $('animSpeedVal').textContent = (+e.target.value).toFixed(1) + '×'; recolor(l); save(); };
     $('flowAngle').oninput = (e) => { const l = SP(); l.flowAngle = +e.target.value; $('flowAngleVal').textContent = l.flowAngle + '°'; recolor(l); save(); };
@@ -1825,6 +1960,26 @@
     $('pngBtn').onclick = exportPNG;
     $('gifBtn').onclick = exportGIF;
     $('apngBtn').onclick = exportAPNG;
+    $('projSaveBtn').onclick = () => {
+      downloadBlob(new Blob([JSON.stringify(buildProjectFile(), null, 2)],
+        { type: 'application/json' }), 'einstein-wallpaper-project.json');
+      statusEl.textContent = 'project saved as JSON';
+    };
+    $('projLoadBtn').onclick = () => $('projFile').click();
+    $('projFile').onchange = (e) => {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          loadProjectFromText(String(reader.result));
+        } catch (err) {
+          statusEl.textContent = 'load failed: ' + err.message;
+        }
+      };
+      reader.readAsText(file);
+      e.target.value = '';
+    };
     $('fsBtn').onclick = fullscreen;
     $('resetBtn').onclick = () => {
       project = LT.defaultProject();

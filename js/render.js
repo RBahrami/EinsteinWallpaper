@@ -507,21 +507,29 @@
   /* ------------------------------------------------------- drawing */
 
   // paint tiles only (transparent background) onto ctx
-  // look.alpha (0..1, default 1) = foreground opacity: tiles and their
-  // outlines are drawn with that alpha over the background.
+  // look.alpha (0..1, default 1) = legacy whole-foreground alpha.
+  // look.fillAlpha / look.lineAlpha (0..1) override it SEPARATELY for tile
+  // fills and tile borders/strokes, so fill and border transparency can be
+  // controlled independently. Whole-layer opacity stays a composite-time op.
   function paintTiles(ctx, scene, look, colorOverride) {
     const W = scene.W, H = scene.H;
     const lw = look.outlineWidth || 0;
     const gap = look.gap || 0;
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
-    const fgAlpha = (look && look.alpha != null) ? Math.max(0, Math.min(1, +look.alpha)) : 1;
-    ctx.globalAlpha = fgAlpha;
+    const base = (look && look.alpha != null) ? Math.max(0, Math.min(1, +look.alpha)) : 1;
+    const fillA = (look && look.fillAlpha != null) ? Math.max(0, Math.min(1, +look.fillAlpha)) : base;
+    const lineA = (look && look.lineAlpha != null) ? Math.max(0, Math.min(1, +look.lineAlpha)) : base;
+    const drawFill = fillA > 0;
+    const drawLine = lw > 0 && lineA > 0;
+    if (!drawFill && !drawLine && scene.kind !== 'line') return;
+    if (scene.kind === 'line' && lineA <= 0) return;
+    ctx.globalAlpha = fillA;
 
     if (scene.kind === 'hat') {
       const outline = shrunkHatOutline(gap);
       const V = scene.view;
-      if (lw > 0) { ctx.strokeStyle = look.line; ctx.lineWidth = lw; }
+      if (drawLine) { ctx.strokeStyle = look.line; ctx.lineWidth = lw; }
       const n = scene.hats.length;
       const margin = 40;
       for (let i = 0; i < n; i++) {
@@ -543,9 +551,15 @@
           if (j === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
         }
         ctx.closePath();
-        ctx.fillStyle = colorOverride ? colorOverride(hat, i) : look.lut[scene.lutIdx[i]];
-        ctx.fill();
-        if (lw > 0) ctx.stroke();
+        if (drawFill) {
+          ctx.globalAlpha = fillA;
+          ctx.fillStyle = colorOverride ? colorOverride(hat, i) : look.lut[scene.lutIdx[i]];
+          ctx.fill();
+        }
+        if (drawLine) {
+          ctx.globalAlpha = lineA;
+          ctx.stroke();
+        }
       }
       ctx.globalAlpha = 1;
       return;
@@ -556,6 +570,7 @@
     if (scene.kind === 'line') {
       ctx.lineCap = 'butt';
       ctx.lineWidth = scene.lineWidth || 1;
+      ctx.globalAlpha = lineA;
       const n = tiles.length;
       for (let i = 0; i < n; i++) {
         const s = screen[i];
@@ -596,9 +611,17 @@
         for (let j = 2; j < s.length; j += 2) ctx.lineTo(s[j], s[j + 1]);
       }
       ctx.closePath();
-      ctx.fillStyle = colorOverride ? colorOverride(tiles[i], i) : look.lut[scene.lutIdx[i]];
-      ctx.fill();
-      if (lw > 0) { ctx.strokeStyle = look.line; ctx.lineWidth = lw; ctx.stroke(); }
+      if (drawFill) {
+        ctx.globalAlpha = fillA;
+        ctx.fillStyle = colorOverride ? colorOverride(tiles[i], i) : look.lut[scene.lutIdx[i]];
+        ctx.fill();
+      }
+      if (drawLine) {
+        ctx.globalAlpha = lineA;
+        ctx.strokeStyle = look.line;
+        ctx.lineWidth = lw;
+        ctx.stroke();
+      }
     }
     ctx.globalAlpha = 1;
   }

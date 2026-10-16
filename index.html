@@ -108,9 +108,17 @@
             <label>Gap between tiles <output id="gapVal"></output></label>
             <input type="range" id="gap" min="0" max="10" step="1">
           </div>
+          <div class="row" id="fillAlphaRow">
+            <label>Fill transparency <output id="fillAlphaVal"></output></label>
+            <input type="range" id="fillAlpha" min="0" max="100" step="1">
+          </div>
           <div class="row" id="outlineRow">
             <label>Outline width <output id="outlineWidthVal"></output></label>
             <input type="range" id="outlineWidth" min="0" max="4" step="0.1">
+          </div>
+          <div class="row" id="lineAlphaRow">
+            <label id="lineAlphaLabel">Border transparency <output id="lineAlphaVal"></output></label>
+            <input type="range" id="lineAlpha" min="0" max="100" step="1">
           </div>
           <div class="row">
             <label>Seed <output id="seedVal"></output></label>
@@ -264,10 +272,12 @@
             <input type="file" id="themeFile" accept=".json,application/json" hidden>
           </div>
           <p class="help">Every mode keeps its own arrangement, editor and
-            templates; edits apply to the <b>selected layer</b> live. The
-            wallpaper background lives on the Background layer (see the Layers
-            section). Saved templates and custom palettes/gradients persist in
-            the browser and travel with the theme export/import files.</p>
+            templates; edits apply to the <b>selected layer</b> live. <b>Auto
+            outline</b> picks a border color from the palette/background;
+            uncheck it to set a manual border color. The wallpaper background
+            lives on the Background layer (see the Layers section). Saved
+            templates and custom palettes/gradients persist in the browser
+            and travel with the theme export/import files.</p>
         </div>
       </details>
 
@@ -280,25 +290,66 @@
             <select id="bgFillSource">
               <option value="solid">Solid color</option>
               <option value="gradient">Gradient</option>
-              <option value="palette">From palette</option>
             </select>
           </div>
           <div class="row" id="bgSolidRow">
             <label for="bgFillColor">Color</label>
             <input type="color" id="bgFillColor" value="#0b1020">
           </div>
-          <div class="row" id="bgGradRow">
-            <label for="bgFillGradient">Gradient</label>
-            <select id="bgFillGradient"></select>
-          </div>
-          <div class="row" id="bgPalRow">
-            <label>Palette <span class="hint">defines the fill color</span></label>
-            <div id="bgPalGrid" class="swatches"></div>
+          <div id="bgGradEditor">
+            <div class="row">
+              <label for="bgGradTpl">Gradient templates</label>
+              <select id="bgGradTpl"></select>
+            </div>
+            <div class="row">
+              <label>Preview <span class="hint" id="bgGradState"></span></label>
+              <div class="gpreview"><canvas id="bgGradPreview" height="26"></canvas></div>
+            </div>
+            <div class="row two">
+              <div>
+                <label for="bgGradType">Type</label>
+                <select id="bgGradType">
+                  <option value="linear">Linear</option>
+                  <option value="radial">Radial</option>
+                  <option value="conic">Conic</option>
+                </select>
+              </div>
+              <div>
+                <label>Angle <output id="bgGradAngleVal"></output></label>
+                <input type="range" id="bgGradAngle" min="0" max="345" step="15">
+              </div>
+            </div>
+            <div class="row">
+              <label>Color stops <span class="hint" id="bgGradStopCount"></span></label>
+              <div id="bgGradStops" class="stoplist"></div>
+              <div class="btnrow tight">
+                <button id="bgGradAddStop" class="btn mini">+ Stop</button>
+                <button id="bgGradDraftReset" class="btn mini">↺ Reset edits</button>
+              </div>
+            </div>
           </div>
           <p class="help">The Background layer is always at the bottom of the
-            stack and its palette reference is explicit — recoloring a pattern
-            layer never changes it. Hide it (eye icon in Layers) or set opacity
-            below 100% to export PNG/APNG wallpapers with real transparency.</p>
+            stack. It supports a solid color or a fully editable gradient
+            (type, angle, stops) and never depends on the selected pattern
+            layer. Hide it (eye icon in Layers) or set opacity below 100% to
+            export PNG/APNG wallpapers with real transparency.</p>
+        </div>
+      </details>
+
+      <!-- ======================= PROJECT FILE ======================= -->
+      <details id="sec-project">
+        <summary>Project file</summary>
+        <div class="body">
+          <div class="btnrow">
+            <button id="projSaveBtn" class="btn mini">💾 Save project</button>
+            <button id="projLoadBtn" class="btn mini">📂 Load project</button>
+            <input type="file" id="projFile" accept=".json,application/json" hidden>
+          </div>
+          <p class="help">Downloads/loads the whole project (all layers,
+            settings and custom palettes/gradients) as one <b>JSON</b> file.
+            The format is documented in <b>docs/AGENT_GUIDE.md</b> — agents
+            can generate wallpapers by producing that JSON and loading it
+            here.</p>
         </div>
       </details>
 
