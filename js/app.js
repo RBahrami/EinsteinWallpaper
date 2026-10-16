@@ -1,19 +1,32 @@
 /*
  * app.js — UI wiring for EinsteinWallpaper (Geometric Wallpaper Studio).
  *
- * Color theme: one section, four modes (Single / Palette / Gradient /
- * Duotone). Each mode owns dedicated settings — arrangement, template
- * library, inline editor — shown only while that mode is active. Every
- * control recolors the wallpaper live; templates can be customized and
- * saved/loaded per mode. Foreground opacity fades tiles+outlines over the
- * background in the preview and in every export format.
+ * Multi-layer model (js/layers.js): one permanent Background layer at the
+ * bottom of the stack plus up to 8 Pattern layers. Only canvas dimensions,
+ * aspect and resolution are global — every tiling, color-theme, effect and
+ * animation setting belongs to a layer. The sidebar sections (Tiling, Color
+ * theme, Visual effects, Animation) edit the SELECTED layer; the Layers
+ * panel handles add/duplicate/rename/delete/reorder/visibility/opacity.
+ *
+ * Rendering: every visible pattern layer is built into its own scene canvas
+ * (cached per layer; only stale scenes rebuild), post-processed per layer
+ * (FX.composeLayer), then composited onto the shared output in stack order
+ * with the layer's opacity. A single visible opaque layer composites through
+ * the legacy FX.compose fast path. Exports (PNG / GIF / APNG) render the
+ * exact same composition at the chosen output resolution; animated exports
+ * align all layers onto one seamless loop (Layers.planLoop).
+ *
+ * Persistence: project JSON in localStorage 'einstein-wallpaper-v2'; a
+ * legacy 'einstein-wallpaper-v1' blob is migrated once (background settings
+ * -> Background layer, fgAlpha -> pattern layer opacity). Palettes,
+ * gradients and color templates keep their own stores.
  */
 (function () {
   'use strict';
 
-  const HT = window.HatTiling, R = window.Renderer, PAL = window.Palettes,
+  const R = window.Renderer, PAL = window.Palettes,
     TL = window.Tilings, GR = window.Gradients, CP = window.CustomPalettes,
-    FX = window.Effects, AP = window.Apng;
+    FX = window.Effects, AP = window.Apng, LT = window.Layers;
 
   /* ------------------------------------------------------- presets */
 
@@ -56,7 +69,6 @@
     ['single', 'Single'], ['palette', 'Palette'],
     ['gradient', 'Gradient'], ['duotone', 'Duotone'],
   ];
-  const THEME_MODE_IDS = THEME_MODES.map((m) => m[0]);
   const MAP_LABELS = {
     supertile: 'Supertiles (patches)',
     kind: 'By tile kind',
@@ -80,84 +92,45 @@
     ['#ff8bd2', '#4dffb8'], ['#f4f1ea', '#54718f'], ['#ffd9a0', '#4a1c3d'],
   ];
 
-  const FX_DEFAULTS = {
-    blur: 0, glow: 0, glowRadius: 14,
-    shadow: 0, shadowSoft: 14, shadowOff: 8,
-    grain: 0, vignette: 0, vignetteMode: 'dark',
-  };
+  /* -------------------------------------- project state + migration */
 
-  const DEFAULTS = {
-    aspect: '16:9', orientation: 'landscape',
-    resW: 1920, resH: 1080,
-    family: 'hat', tileSize: 34, variant: 'H', rotation: 0, panX: 0, panY: 0,
-    gap: 0.02, outlineWidth: 1.2,
-    themeMode: 'palette',
-    colorMap: 'supertile', gradMap: 'sweep', gradBands: 5, duoMap: 'checker',
-    singleColor: '#5bc8ff', duoA: '#5bc8ff', duoB: '#f4777f',
-    paletteRef: { kind: 'builtin', index: 0 },
-    gradientId: null, bgSource: 'theme', bgColor: '#0b1020',
-    fgAlpha: 100,
-    lineAuto: true, lineColor: '#101014',
-    animation: 'shimmer', animSpeed: 1, flowAngle: 30,
-    effects: { ...FX_DEFAULTS },
-    seed: 7,
-  };
+  const STORE_V2 = 'einstein-wallpaper-v2';
+  const STORE_V1 = 'einstein-wallpaper-v1';
 
-  /* -------------------------------------- settings load + migration */
+  let project = loadProject();
 
-  let P = loadSettings();
-
-  function loadSettings() {
-    const p = JSON.parse(JSON.stringify(DEFAULTS));
+  function loadProject() {
+    // 1) a saved v2 project wins
     try {
-      const saved = localStorage.getItem('einstein-wallpaper-v1');
-      if (saved) {
-        const s = JSON.parse(saved);
-        // migration: pre-theme settings -> unified color theme
-        if (!s.themeMode) {
-          const cm = s.colorMode || 'supertile';
-          if (cm === 'solid') {
-            p.themeMode = 'single';
-          } else {
-            p.themeMode = s.colorSource === 'gradient' ? 'gradient' : 'palette';
-            if (cm !== 'gradient') p.colorMap = cm;
-            p.gradMap = cm === 'gradient' ? 'sweep' : 'random';
-          }
-          if (s.bgSource === 'gradient') p.bgSource = 'gradient';
-        }
-        Object.assign(p, s);
-        // migration: legacy numeric palette -> builtin ref
-        if (typeof s.palette === 'number' && !s.paletteRef) {
-          p.paletteRef = { kind: 'builtin', index: s.palette };
-        }
-        delete p.colorMode; delete p.colorSource;
-        if (!THEME_MODE_IDS.includes(p.themeMode)) p.themeMode = 'palette';
-        if (!['theme', 'gradient', 'custom'].includes(p.bgSource)) p.bgSource = 'theme';
-        if (!GR.isHexColor(p.singleColor)) p.singleColor = DEFAULTS.singleColor;
-        if (!GR.isHexColor(p.duoA)) p.duoA = DEFAULTS.duoA;
-        if (!GR.isHexColor(p.duoB)) p.duoB = DEFAULTS.duoB;
-        if (!GR.isHexColor(p.bgColor)) p.bgColor = DEFAULTS.bgColor;
-        p.gradBands = Math.max(2, Math.min(12, +p.gradBands || 5));
-        p.fgAlpha = (s.fgAlpha == null || isNaN(+s.fgAlpha))
-          ? 100 : Math.max(0, Math.min(100, Math.round(+s.fgAlpha)));
-        if (!TL.isFamily(p.family)) p.family = 'hat';
-        if (p.family === 'hat' && !['H', 'P', 'F'].includes(p.variant)) p.variant = 'H';
-        p.effects = Object.assign({}, FX_DEFAULTS, s.effects || {});
-        for (const k of Object.keys(FX_DEFAULTS)) {
-          if (typeof p.effects[k] !== typeof FX_DEFAULTS[k]) p.effects[k] = FX_DEFAULTS[k];
-        }
-        if (!ANIMS.some((a) => a[0] === p.animation)) p.animation = 'shimmer';
-      }
-    } catch (e) { /* defensive: malformed storage -> defaults */ }
-    return p;
+      const raw = localStorage.getItem(STORE_V2);
+      if (raw) return fixProjectRefs(LT.sanitizeProject(JSON.parse(raw)));
+    } catch (e) { /* fall through */ }
+    // 2) migrate the legacy flat v1 settings (keeps palette/gradient refs);
+    //    persist the migration immediately so it sticks without any edit
+    let legacy = null;
+    try { legacy = JSON.parse(localStorage.getItem(STORE_V1) || 'null'); } catch (e) { /* ignore */ }
+    const proj = fixProjectRefs(LT.sanitizeProject(legacy));
+    try { localStorage.setItem(STORE_V2, JSON.stringify(proj)); } catch (e) { /* ignore */ }
+    return proj;
+  }
+
+  // post-sanitize reference validation that needs the runtime libraries
+  function fixProjectRefs(proj) {
+    for (const layer of LT.patternLayers(proj)) {
+      if (!TL.isFamily(layer.family)) layer.family = 'hat';
+      const fam = TL.get(layer.family);
+      if (!fam.variants.some((v) => v.id === layer.variant)) layer.variant = fam.defaultVariant;
+      if (layer.theme.gradientId && !GR.find(layer.theme.gradientId)) layer.theme.gradientId = null;
+      if (!layer.theme.gradientId) layer.theme.gradientId = GR.BUILTINS[0].id;
+    }
+    const bg = LT.bgLayer(proj);
+    if (bg.bg.gradientId && !GR.find(bg.bg.gradientId)) bg.bg.gradientId = GR.BUILTINS[0].id;
+    return proj;
   }
 
   function save() {
-    try { localStorage.setItem('einstein-wallpaper-v1', JSON.stringify(P)); } catch (e) { /* ignore */ }
+    try { localStorage.setItem(STORE_V2, JSON.stringify(project)); } catch (e) { /* ignore */ }
   }
-
-  // custom palette resolver for Palettes.get
-  PAL.setCustomResolver((id) => CP.find(id));
 
   // generic template store (Single colors, Duotone pairs) — localStorage
   function tplStore(key) {
@@ -181,16 +154,48 @@
   const singleStore = tplStore('ew-single-templates-v1');
   const duoStore = tplStore('ew-duo-templates-v1');
 
+  // per-layer transient edit drafts (unsaved palette/gradient tweaks).
+  // Runtime only — like the pre-layer behavior, unsaved drafts are lost on
+  // reload unless saved as a custom palette/gradient/template.
+  const drafts = new Map(); // layerId -> { pal: {active, draft}, grad: {active, draft, editId} }
+  function draftFor(id) {
+    let d = drafts.get(id);
+    if (!d) {
+      d = { pal: { active: false, draft: null }, grad: { active: false, draft: null, editId: null } };
+      drafts.set(id, d);
+    }
+    return d;
+  }
+
+  // custom palette resolver for Palettes.get
+  PAL.setCustomResolver((id) => CP.find(id));
+
+  /* ------------------------------------------------- dom + selection */
+
+  const $ = (id) => document.getElementById(id);
+  const canvas = $('preview');
+  const statusEl = $('status');
+
+  function SL() { return LT.selectedLayer(project); }
+  function SP() {
+    const l = SL();
+    return (l && l.type === 'pattern') ? l : LT.patternLayers(project)[0];
+  }
+  function selectLayer(id) {
+    if (project.selected === id) return;
+    project.selected = id;
+    save();
+    syncControls();
+    const l = SL();
+    if (l) notice(`Editing "${l.name}"`);
+  }
+
   function naturalOrientation(a) { return a.r >= 1 ? 'landscape' : 'portrait'; }
   function currentAspect() {
-    const a = ASPECTS.find((x) => x.id === P.aspect) || ASPECTS[0];
+    const a = ASPECTS.find((x) => x.id === project.aspect) || ASPECTS[0];
     const nat = naturalOrientation(a);
-    if (P.orientation === nat) return a.r;
+    if (project.orientation === nat) return a.r;
     return 1 / a.r;
-  }
-  function currentFamily() { return TL.get(P.family); }
-  function currentGradient() {
-    return GR.find(P.gradientId) || GR.BUILTINS[0];
   }
   function sameRef(a, b) {
     if (a === b) return true;
@@ -200,17 +205,52 @@
     return false;
   }
 
+  /* ------------------------------------------- background layer fill */
+
+  // Resolved fill spec of the Background layer (explicit reference — it
+  // never depends on which pattern layer happens to be selected).
+  function bgFillSpec() {
+    const b = LT.bgLayer(project).bg;
+    if (b.source === 'gradient') {
+      return { kind: 'gradient', grad: GR.find(b.gradientId) || GR.BUILTINS[0] };
+    }
+    if (b.source === 'palette') {
+      return { kind: 'solid', color: PAL.get(b.paletteRef).bg };
+    }
+    return { kind: 'solid', color: b.color };
+  }
+  function paintBackgroundFill(ctx, W, H) {
+    const spec = bgFillSpec();
+    if (spec.kind === 'gradient') {
+      const g = GR.toCanvas(ctx, spec.grad, W, H, 0);
+      if (g && g.conic) GR.fillConic(ctx, spec.grad, W, H);
+      else { ctx.fillStyle = g; ctx.fillRect(0, 0, W, H); }
+    } else {
+      ctx.fillStyle = spec.color;
+      ctx.fillRect(0, 0, W, H);
+    }
+  }
+  function effectiveBgColor() {
+    const spec = bgFillSpec();
+    return spec.kind === 'gradient' ? GR.sample(spec.grad, 0.5) : spec.color;
+  }
+  function bgSourceLabel(layer) {
+    return layer.bg.source === 'gradient' ? 'gradient'
+      : layer.bg.source === 'palette' ? 'palette' : 'solid';
+  }
+
   /* ------------------------------------------- color theme helpers */
 
-  // arrangement options available for a theme mode + family. Options that
-  // would be mathematically constant on the current family (By tile kind /
-  // By orientation on families with a single kind/orientation) are hidden —
+  // Arrangement options for a layer's theme mode. Options that would be
+  // mathematically constant on the current family (By tile kind / By
+  // orientation on families with a single kind/orientation) are hidden —
   // the engine's degenerate-map guard covers any stale-scene race.
-  function arrOptions(mode) {
-    const fam = currentFamily();
+  function arrOptions(layer, modeArg) {
+    const fam = TL.get(layer.family);
     const kind = fam.id === 'hat' ? 'hat' : (fam.id === 'lines' ? 'line' : 'poly');
-    const counts = (scene && scene.kind === 'poly' && scene.family === P.family) ? scene : null;
-    const m = mode || P.themeMode;
+    const e = cache.get(layer.id);
+    const counts = (e && e.scene && e.scene.kind === 'poly' && e.scene.family === layer.family) ? e.scene : null;
+    const m = modeArg || layer.theme.mode;
     if (m === 'palette') {
       if (kind === 'hat') return ['supertile', 'orientation', 'mirror', 'checker', 'random'];
       if (kind === 'poly') {
@@ -230,129 +270,139 @@
     return mode === 'palette' ? 'colorMap'
       : mode === 'gradient' ? 'gradMap' : 'duoMap';
   }
-  // the colorMap value colorize() should use for the active theme mode
-  function currentMap() {
-    if (P.themeMode === 'single') return 'single';
-    if (P.themeMode === 'gradient') return P.gradMap;
-    if (P.themeMode === 'duotone') return P.duoMap;
-    return P.colorMap;
+  function currentMap(layer) {
+    const th = layer.theme;
+    if (th.mode === 'single') return 'single';
+    if (th.mode === 'gradient') return th.gradMap;
+    if (th.mode === 'duotone') return th.duoMap;
+    return th.colorMap;
   }
-  function ensureMapValid() {
-    if (P.themeMode === 'single') return;
-    const key = mapKeyFor(P.themeMode);
-    const opts = arrOptions(P.themeMode);
-    if (!opts.includes(P[key])) P[key] = opts[0];
+  function ensureMapValid(layer) {
+    if (layer.theme.mode === 'single') return;
+    const key = mapKeyFor(layer.theme.mode);
+    const opts = arrOptions(layer);
+    if (!opts.includes(layer.theme[key])) layer.theme[key] = opts[0];
   }
   function setThemeMode(mode) {
-    if (!THEME_MODE_IDS.includes(mode)) mode = 'palette';
-    P.themeMode = mode;
-    if (mode === 'gradient' && P.bgSource === 'theme') P.bgSource = 'gradient';
-    ensureMapValid();
-    syncControls(); recolor(true); save();
+    const layer = SP();
+    if (!THEME_MODES.some((m) => m[0] === mode)) mode = 'palette';
+    layer.theme.mode = mode;
+    ensureMapValid(layer);
+    save(); syncControls(); recolor(layer);
   }
 
-  /* ----------------------------------------------------------- dom */
+  /* ------------------------------------------------- per-layer cache */
 
-  const $ = (id) => document.getElementById(id);
-  const canvas = $('preview');
-  const statusEl = $('status');
-
-  function buildAspectChips() {
-    const box = $('aspectChips');
-    box.innerHTML = '';
-    for (const a of ASPECTS) {
-      const b = document.createElement('button');
-      b.className = 'chip' + (P.aspect === a.id ? ' on' : '');
-      b.textContent = a.id;
-      b.title = a.r >= 1 ? 'landscape' : 'portrait';
-      b.onclick = () => {
-        P.aspect = a.id;
-        P.orientation = naturalOrientation(a);
-        applyResForAspect();
-        syncControls(); refresh(); save();
+  // cache: layerId -> { gkey, ckey, scene, params, look, animator,
+  //                     canvas(scene), ctx, fx(fx scratch), fxCtx }
+  const cache = new Map();
+  function entryFor(layer) {
+    let e = cache.get(layer.id);
+    if (!e) {
+      e = {
+        gkey: null, ckey: null, scene: null, params: null, look: null, animator: null,
+        canvas: document.createElement('canvas'), ctx: null,
+        fx: document.createElement('canvas'), fxCtx: null,
       };
-      box.appendChild(b);
+      e.ctx = e.canvas.getContext('2d');
+      e.fxCtx = e.fx.getContext('2d');
+      cache.set(layer.id, e);
     }
+    return e;
   }
 
-  function applyResForAspect() {
-    const a = ASPECTS.find((x) => x.id === P.aspect) || ASPECTS[0];
-    const list = RES_PRESETS[P.aspect] || [[1920, 1080]];
-    const nat = naturalOrientation(a);
-    const swapped = P.orientation !== nat;
-    const eff = swapped ? list.map((r) => [r[1], r[0]]) : list;
-    if (!eff.some((r) => r[0] === P.resW && r[1] === P.resH)) { P.resW = eff[0][0]; P.resH = eff[0][1]; }
+  function layerParams(layer) {
+    return {
+      family: layer.family, variant: layer.variant,
+      tileSize: layer.tileSize, rotation: layer.rotation,
+      panX: layer.panX || 0, panY: layer.panY || 0,
+      gap: layer.gap, outlineWidth: layer.outlineWidth, seed: layer.seed,
+      gradBands: layer.theme.gradBands, paletteRef: layer.theme.paletteRef,
+      animation: layer.animation, animSpeed: layer.animSpeed, flowAngle: layer.flowAngle,
+    };
+  }
+  // geometry key: a change here requires a scene rebuild
+  function gkeyFor(layer, W, H) {
+    return [W, H, layer.family, layer.variant, layer.tileSize, layer.rotation,
+      layer.panX || 0, layer.panY || 0, layer.seed, layer.animation === 'none'].join('|');
+  }
+  // color/look key: a change here only re-colorizes + repaints the scene
+  function ckeyFor(layer) {
+    const th = layer.theme;
+    const d = draftFor(layer.id);
+    return [th.mode, th.colorMap, th.gradMap, th.duoMap, th.gradBands,
+      th.singleColor, th.duoA, th.duoB, JSON.stringify(th.paletteRef), th.gradientId,
+      d.pal.active ? JSON.stringify(d.pal.draft) : '',
+      d.grad.active ? JSON.stringify(d.grad.draft) : '',
+      layer.lineAuto, layer.lineColor, layer.gap, layer.outlineWidth,
+      layer.animation, layer.animSpeed, layer.flowAngle,
+      effectiveBgColor()].join('|');
   }
 
-  function buildResSelect() {
-    const sel = $('resSelect');
-    const a = ASPECTS.find((x) => x.id === P.aspect) || ASPECTS[0];
-    const list0 = RES_PRESETS[P.aspect] || [[1920, 1080]];
-    const list = P.orientation !== naturalOrientation(a) ? list0.map((r) => [r[1], r[0]]) : list0;
-    sel.innerHTML = '';
-    for (const [w, h] of list) {
-      const o = document.createElement('option');
-      o.value = w + 'x' + h;
-      o.textContent = `${w} × ${h}`;
-      if (P.resW === w && P.resH === h) o.selected = true;
-      sel.appendChild(o);
+  function palSourceFor(layer) {
+    const d = draftFor(layer.id);
+    if (d.pal.active && d.pal.draft) return d.pal.draft;
+    return PAL.get(layer.theme.paletteRef);
+  }
+  function gradSourceFor(layer) {
+    const d = draftFor(layer.id);
+    if (d.grad.active && d.grad.draft) return d.grad.draft;
+    return GR.find(layer.theme.gradientId) || GR.BUILTINS[0];
+  }
+
+  // color look for a PATTERN layer: LUT + outline + paint geometry.
+  // look.alpha stays 1 — layer opacity is applied at composite time to the
+  // entire rendered layer (tiles, outlines, shadows, glow alike).
+  function makeLayerLook(layer) {
+    const th = layer.theme;
+    const d = draftFor(layer.id);
+    let lut, pal = null;
+    if (th.mode === 'single') {
+      lut = R.buildSolidLut(th.singleColor);
+    } else if (th.mode === 'gradient') {
+      lut = R.buildLut({ _isGradient: true, gradient: gradSourceFor(layer) });
+    } else if (th.mode === 'duotone') {
+      lut = R.buildLut({
+        _isGradient: true,
+        gradient: GR.normalize({
+          type: 'linear', angle: 0,
+          stops: [{ pos: 0, color: th.duoA }, { pos: 1, color: th.duoB }],
+        }),
+      });
+    } else {
+      pal = palSourceFor(layer);
+      lut = d.pal.active ? R.buildLutFromColors(pal.colors) : R.buildLut(th.paletteRef);
     }
-    const o = document.createElement('option');
-    o.value = 'custom';
-    o.textContent = 'Custom…';
-    if (!list.some(([w, h]) => w === P.resW && h === P.resH)) o.selected = true;
-    sel.appendChild(o);
-  }
-
-  function fillSelect(sel, pairs, value) {
-    sel.innerHTML = '';
-    for (const [v, label] of pairs) {
-      const o = document.createElement('option');
-      o.value = v; o.textContent = label;
-      if (v === value) o.selected = true;
-      sel.appendChild(o);
-    }
-  }
-
-  /* ------------------------------------------- family grid */
-
-  function buildFamilyGrid() {
-    const grid = $('familyGrid');
-    grid.innerHTML = '';
-    for (const fam of TL.FAMILIES) {
-      const b = document.createElement('button');
-      b.className = 'fam' + (P.family === fam.id ? ' on' : '');
-      b.setAttribute('role', 'option');
-      b.setAttribute('aria-selected', P.family === fam.id ? 'true' : 'false');
-      b.title = fam.name;
-      b.innerHTML = fam.icon + `<span>${fam.name}</span>`;
-      b.onclick = () => {
-        if (P.family === fam.id) return;
-        P.family = fam.id;
-        P.variant = fam.defaultVariant;
-        ensureMapValid();
-        syncControls(); refresh(); save();
+    // outline: palette's own outline (when Auto outline is on) -> auto -> manual
+    const palOutline = pal && pal.outline != null ? pal.outline : null;
+    const line = layer.lineAuto ? (palOutline || PAL.autoLineColor(effectiveBgColor())) : layer.lineColor;
+    const look = { lut, line, bg: effectiveBgColor(), gap: layer.gap, outlineWidth: layer.outlineWidth, alpha: 1 };
+    // for the single-layer fast path (FX.compose paints the background from
+    // the look) carry the real background fill when it is a gradient
+    const spec = bgFillSpec();
+    if (spec.kind === 'gradient') {
+      const g = spec.grad;
+      look.bg = GR.sample(g, 0.5);
+      look.bgPaint = (ctx, W, H) => {
+        const gp = GR.toCanvas(ctx, g, W, H, 0);
+        if (gp && gp.conic) GR.fillConic(ctx, g, W, H);
+        else { ctx.fillStyle = gp; ctx.fillRect(0, 0, W, H); }
       };
-      grid.appendChild(b);
     }
+    return look;
   }
 
   /* --------------------------------------- palette templates grid */
 
-  function currentPaletteSource() {
-    // the palette the mode panel works on: the live draft, or the selected ref
-    if (palDraftActive) return palDraft;
-    return PAL.get(P.paletteRef);
-  }
-
-  function buildPaletteGrid() {
+  function buildPaletteGrid(layer) {
     const grid = $('paletteGrid');
     grid.innerHTML = '';
     const nameEl = $('palName');
-    const pal = PAL.get(P.paletteRef);
-    if (nameEl) nameEl.textContent = (palDraftActive ? 'edited · ' : '') + pal.name;
+    const pal = palSourceFor(layer);
+    const d = draftFor(layer.id);
+    if (nameEl) nameEl.textContent = (d.pal.active ? 'edited · ' : '') + pal.name;
     PAL.LIST.forEach((palB, i) => {
-      grid.appendChild(makeSwatch(palB, { kind: 'builtin', index: i }));
+      grid.appendChild(makeSwatch(layer, palB, { kind: 'builtin', index: i }));
     });
     const customs = CP.list();
     if (customs.length) {
@@ -360,45 +410,51 @@
       sep.className = 'swatch-sep';
       sep.title = 'Custom palettes';
       grid.appendChild(sep);
-      for (const p of customs) grid.appendChild(makeSwatch(p, { kind: 'custom', id: p.id }));
+      for (const p of customs) grid.appendChild(makeSwatch(layer, p, { kind: 'custom', id: p.id }));
     }
   }
-  function makeSwatch(pal, ref) {
+  function makeSwatch(layer, pal, ref) {
     const b = document.createElement('button');
-    const on = sameRef(P.paletteRef, ref);
+    const on = sameRef(layer.theme.paletteRef, ref) && !draftFor(layer.id).pal.active;
     b.className = 'swatch' + (on ? ' on' : '');
     b.title = pal.name + (ref.kind === 'custom' ? ' (custom)' : '');
     b.style.background = `linear-gradient(135deg, ${pal.colors.join(',')})`;
     b.style.borderColor = on ? '#fff' : 'rgba(255,255,255,.15)';
-    b.onclick = () => applyPaletteRef(ref);
+    b.onclick = () => applyPaletteRef(layer, ref);
     return b;
   }
-  function applyPaletteRef(ref) {
-    P.paletteRef = ref;
-    palDraftActive = false;
-    loadPalDraft();
-    buildPaletteGrid();
-    renderPalEditor();
-    recolor(false); save();
+  function applyPaletteRef(layer, ref) {
+    layer.theme.paletteRef = ref;
+    draftFor(layer.id).pal.active = false;
+    loadPalDraft(layer);
+    save();
+    syncControls();
+    recolor(layer);
   }
 
-  /* -------------------------------------- palette editor (inline) */
+  /* -------------------------------------- palette editor (per layer) */
 
-  let palDraftActive = false;         // true while unsaved edits are applied
-  let palDraft = null;                // {name, colors[], bg, outline}
-
-  function loadPalDraft() {
+  function loadPalDraft(layer) {
+    const d = draftFor(layer.id);
     let src;
-    if (P.paletteRef.kind === 'custom') src = CP.find(P.paletteRef.id) || PAL.LIST[0];
-    else src = PAL.LIST[P.paletteRef.index] || PAL.LIST[0];
-    palDraft = {
+    if (layer.theme.paletteRef.kind === 'custom') src = CP.find(layer.theme.paletteRef.id) || PAL.LIST[0];
+    else src = PAL.LIST[layer.theme.paletteRef.index] || PAL.LIST[0];
+    d.pal.draft = {
       name: src.name,
       colors: [...src.colors],
       bg: src.bg || '#0b1020',
       outline: ('outline' in src && src.outline != null) ? src.outline : null,
     };
   }
-  function renderPalEditor() {
+  function palEdited(layer) {
+    const d = draftFor(layer.id);
+    d.pal.active = true;
+    $('palEditState').textContent = 'edited · live';
+  }
+  function renderPalEditor(layer) {
+    const d = draftFor(layer.id);
+    if (!d.pal.draft) loadPalDraft(layer);
+    const palDraft = d.pal.draft;
     const list = $('palStops');
     list.innerHTML = '';
     palDraft.colors.forEach((c, i) => {
@@ -407,25 +463,23 @@
       const col = document.createElement('input');
       col.type = 'color'; col.value = c;
       col.oninput = () => {
-        palDraft.colors[i] = col.value; palDraftActive = true;
-        $('palEditState').textContent = 'edited · live';
-        buildPaletteGrid(); renderPalPreviewStrip(); recolor(false); save();
+        palDraft.colors[i] = col.value; palEdited(layer);
+        buildPaletteGrid(layer); recolor(layer); save();
       };
-      const hex = document.createElement('input');
-      hex.type = 'text'; hex.value = c; hex.className = 'hextext'; hex.spellcheck = false;
-      hex.onchange = () => {
-        if (GR.isHexColor(hex.value)) {
-          palDraft.colors[i] = GR.normHex(hex.value); palDraftActive = true;
-          $('palEditState').textContent = 'edited · live';
-          buildPaletteGrid(); renderPalEditor(); recolor(false); save();
-        } else hex.value = palDraft.colors[i];
+      const hexin = document.createElement('input');
+      hexin.type = 'text'; hexin.value = c; hexin.className = 'hextext'; hexin.spellcheck = false;
+      hexin.onchange = () => {
+        if (GR.isHexColor(hexin.value)) {
+          palDraft.colors[i] = GR.normHex(hexin.value); palEdited(layer);
+          buildPaletteGrid(layer); renderPalEditor(layer); recolor(layer); save();
+        } else hexin.value = palDraft.colors[i];
       };
       const up = document.createElement('button');
       up.className = 'mini-btn'; up.textContent = '↑'; up.title = 'Move up';
       up.onclick = () => {
         if (i > 0) {
           [palDraft.colors[i - 1], palDraft.colors[i]] = [palDraft.colors[i], palDraft.colors[i - 1]];
-          palDraftActive = true; buildPaletteGrid(); renderPalEditor(); recolor(false); save();
+          palEdited(layer); buildPaletteGrid(layer); renderPalEditor(layer); recolor(layer); save();
         }
       };
       const down = document.createElement('button');
@@ -433,7 +487,7 @@
       down.onclick = () => {
         if (i < palDraft.colors.length - 1) {
           [palDraft.colors[i + 1], palDraft.colors[i]] = [palDraft.colors[i], palDraft.colors[i + 1]];
-          palDraftActive = true; buildPaletteGrid(); renderPalEditor(); recolor(false); save();
+          palEdited(layer); buildPaletteGrid(layer); renderPalEditor(layer); recolor(layer); save();
         }
       };
       const del = document.createElement('button');
@@ -441,41 +495,33 @@
       del.onclick = () => {
         if (palDraft.colors.length > 1) {
           palDraft.colors.splice(i, 1);
-          palDraftActive = true; buildPaletteGrid(); renderPalEditor(); recolor(false); save();
+          palEdited(layer); buildPaletteGrid(layer); renderPalEditor(layer); recolor(layer); save();
         }
       };
-      row.append(col, hex, up, down, del);
+      row.append(col, hexin, up, down, del);
       list.appendChild(row);
     });
     $('palBg').value = palDraft.bg;
     $('palOutline').value = palDraft.outline || PAL.autoLineColor(palDraft.bg);
     $('palOutline').disabled = palDraft.outline == null;
-    renderPalPreviewStrip();
-  }
-  function renderPalPreviewStrip() {
-    // no separate preview canvas: the wallpaper IS the preview
   }
 
-  /* ------------------------------------- gradient editor (inline) */
+  /* ------------------------------------- gradient editor (per layer) */
 
-  let gradDraftActive = false;   // true while unsaved gradient edits apply
-  let gradDraft = null;          // working normalized copy
-  let gradEditId = null;         // template the draft started from
-
-  function loadGradDraft() {
-    const src = GR.find(P.gradientId) || GR.BUILTINS[0];
-    gradDraft = GR.normalize(JSON.parse(JSON.stringify(src)));
-    gradEditId = src.id;
+  function loadGradDraft(layer) {
+    const d = draftFor(layer.id);
+    const src = GR.find(layer.theme.gradientId) || GR.BUILTINS[0];
+    d.grad.draft = GR.normalize(JSON.parse(JSON.stringify(src)));
+    d.grad.editId = src.id;
   }
-  function buildGradPick() {
-    const sel = $('gradPick');
+  function fillGradientSelect(sel, selectedId) {
     sel.innerHTML = '';
     const g1 = document.createElement('optgroup');
     g1.label = 'Built-in';
     GR.BUILTINS.forEach((g) => {
       const o = document.createElement('option');
       o.value = g.id; o.textContent = g.name;
-      if (P.gradientId === g.id) o.selected = true;
+      if (selectedId === g.id) o.selected = true;
       g1.appendChild(o);
     });
     sel.appendChild(g1);
@@ -486,28 +532,31 @@
       for (const g of customs) {
         const o = document.createElement('option');
         o.value = g.id; o.textContent = g.name;
-        if (P.gradientId === g.id) o.selected = true;
+        if (selectedId === g.id) o.selected = true;
         g2.appendChild(o);
       }
       sel.appendChild(g2);
     }
   }
-  function applyGradientId(id) {
-    P.gradientId = id;
-    gradDraftActive = false;
-    loadGradDraft();
-    buildGradPick();
-    renderGradEditor();
-    syncGradEditState();
-    recolor(false); save();
+  function applyGradientId(layer, id) {
+    layer.theme.gradientId = id;
+    const d = draftFor(layer.id);
+    d.grad.active = false;
+    loadGradDraft(layer);
+    fillGradientSelect($('gradPick'), id);
+    syncControls();
+    recolor(layer);
+    save();
   }
-  function gradSource() {
-    return gradDraftActive ? gradDraft : GR.normalize(currentGradient());
+  function gradEdited(layer) {
+    const d = draftFor(layer.id);
+    d.grad.active = true;
+    $('gradEditState').textContent = 'edited · live';
   }
-  function syncGradEditState() {
-    $('gradEditState').textContent = gradDraftActive ? 'edited · live' : '';
-  }
-  function renderGradEditor() {
+  function renderGradEditor(layer) {
+    const d = draftFor(layer.id);
+    if (!d.grad.draft) loadGradDraft(layer);
+    const gradDraft = d.grad.draft;
     fillSelect($('gradType'), [['linear', 'Linear'], ['radial', 'Radial'], ['conic', 'Conic']], gradDraft.type);
     $('gradAngle').value = gradDraft.angle;
     $('gradAngleVal').textContent = gradDraft.angle + '°';
@@ -521,8 +570,8 @@
       col.type = 'color'; col.value = s.color;
       col.oninput = () => {
         gradDraft.stops[i].color = col.value;
-        gradDraftActive = true; syncGradEditState();
-        renderGradPreview(); recolor(false); save();
+        gradEdited(layer);
+        renderGradPreview(layer); recolor(layer); save();
       };
       const pos = document.createElement('input');
       pos.type = 'number'; pos.min = 0; pos.max = 100; pos.step = 1;
@@ -531,44 +580,51 @@
       pos.onchange = () => {
         gradDraft.stops[i].pos = Math.max(0, Math.min(100, +pos.value || 0)) / 100;
         gradDraft.stops.sort((a, b) => a.pos - b.pos);
-        gradDraftActive = true; syncGradEditState();
-        renderGradEditor(); recolor(false); save();
+        gradEdited(layer);
+        renderGradEditor(layer); recolor(layer); save();
       };
       const del = document.createElement('button');
       del.className = 'mini-btn'; del.textContent = '×'; del.title = 'Remove stop';
       del.onclick = () => {
         if (gradDraft.stops.length > 2) {
           gradDraft.stops.splice(i, 1);
-          gradDraftActive = true; syncGradEditState();
-          renderGradEditor(); recolor(false); save();
+          gradEdited(layer);
+          renderGradEditor(layer); recolor(layer); save();
         }
       };
       row.append(col, pos, del);
       list.appendChild(row);
     });
-    $('gradDelete').disabled = !gradEditId || GR.BUILTINS.some((g) => g.id === gradEditId);
-    renderGradPreview();
+    $('gradDelete').disabled = !d.grad.editId || GR.BUILTINS.some((g) => g.id === d.grad.editId);
+    renderGradPreview(layer);
   }
-  function renderGradPreview() {
+  function renderGradPreview(layer) {
+    const d = draftFor(layer.id);
+    const grad = (d.grad.active && d.grad.draft) ? d.grad.draft : GR.normalize(gradSourceFor(layer));
     const cv = $('gradPreview');
     const w = cv.parentElement ? (cv.parentElement.clientWidth || 260) : 260;
     cv.width = w; cv.height = 26;
     const ctx = cv.getContext('2d');
     ctx.clearRect(0, 0, cv.width, cv.height);
-    const g = GR.toCanvas(ctx, gradDraft, cv.width, cv.height, 0);
-    if (g && g.conic) GR.fillConic(ctx, gradDraft, cv.width, cv.height);
+    const g = GR.toCanvas(ctx, grad, cv.width, cv.height, 0);
+    if (g && g.conic) GR.fillConic(ctx, grad, cv.width, cv.height);
     else { ctx.fillStyle = g; ctx.fillRect(0, 0, cv.width, cv.height); }
+  }
+  function syncGradEditState(layer) {
+    const d = draftFor(layer.id);
+    $('gradEditState').textContent = d.grad.active ? 'edited · live' : '';
+    $('palEditState').textContent = d.pal.active ? 'edited · live' : '';
   }
 
   /* ------------------------------- single / duotone templates */
 
-  function buildSingleTpls() {
+  function buildSingleTpls(layer) {
     const box = $('singleTpls');
     box.innerHTML = '';
     SINGLE_TPLS.forEach((c) => {
-      box.appendChild(makeTplSwatch(c, c === P.singleColor, () => {
-        P.singleColor = c; $('singleColor').value = c;
-        buildSingleTpls(); recolor(false); save();
+      box.appendChild(makeTplSwatch(c, c === layer.theme.singleColor, () => {
+        layer.theme.singleColor = c; $('singleColor').value = c;
+        buildSingleTpls(layer); recolor(layer); save();
       }));
     });
     const customs = singleStore.list();
@@ -577,9 +633,9 @@
       sep.className = 'tpl-sep';
       box.appendChild(sep);
       customs.forEach((c, i) => {
-        box.appendChild(makeTplSwatch(c, c === P.singleColor, () => {
-          P.singleColor = c; $('singleColor').value = c;
-          buildSingleTpls(); recolor(false); save();
+        box.appendChild(makeTplSwatch(c, c === layer.theme.singleColor, () => {
+          layer.theme.singleColor = c; $('singleColor').value = c;
+          buildSingleTpls(layer); recolor(layer); save();
         }, i));
       });
     }
@@ -592,15 +648,15 @@
     b.onclick = onclick;
     return b;
   }
-  function buildDuoTpls() {
+  function buildDuoTpls(layer) {
     const box = $('duoTpls');
     box.innerHTML = '';
-    const pairOn = (a, b) => a === P.duoA && b === P.duoB;
+    const pairOn = (a, b) => a === layer.theme.duoA && b === layer.theme.duoB;
     DUO_TPLS.forEach(([a, b]) => {
       box.appendChild(makeTplSwatch(`linear-gradient(135deg, ${a} 50%, ${b} 50%)`, pairOn(a, b), () => {
-        P.duoA = a; P.duoB = b;
+        layer.theme.duoA = a; layer.theme.duoB = b;
         $('duoA').value = a; $('duoB').value = b;
-        buildDuoTpls(); recolor(false); save();
+        buildDuoTpls(layer); recolor(layer); save();
       }));
     });
     const customs = duoStore.list();
@@ -610,9 +666,9 @@
       box.appendChild(sep);
       customs.forEach((p, i) => {
         box.appendChild(makeTplSwatch(`linear-gradient(135deg, ${p.a} 50%, ${p.b} 50%)`, pairOn(p.a, p.b), () => {
-          P.duoA = p.a; P.duoB = p.b;
+          layer.theme.duoA = p.a; layer.theme.duoB = p.b;
           $('duoA').value = p.a; $('duoB').value = p.b;
-          buildDuoTpls(); recolor(false); save();
+          buildDuoTpls(layer); recolor(layer); save();
         }, i));
       });
     }
@@ -620,10 +676,6 @@
 
   /* --------------------------------------------------- rendering */
 
-  const sceneCanvas = document.createElement('canvas');
-  const sceneCtx = sceneCanvas.getContext('2d');
-
-  let scene = null, look = null, animator = null;
   let animRaf = 0;
 
   function previewSize() {
@@ -638,55 +690,50 @@
     return { w: Math.round(w * scale), h: Math.round(h * scale), cssW: Math.round(w), cssH: Math.round(h) };
   }
 
-  function makeLook() {
-    const mode = P.themeMode;
-    let lut, pal = null, grad = null;
-    if (mode === 'single') {
-      lut = R.buildSolidLut(P.singleColor);
-    } else if (mode === 'gradient') {
-      grad = gradSource();
-      lut = R.buildLut({ _isGradient: true, gradient: grad });
-    } else if (mode === 'duotone') {
-      lut = R.buildLut({
-        _isGradient: true,
-        gradient: GR.normalize({
-          type: 'linear', angle: 0,
-          stops: [{ pos: 0, color: P.duoA }, { pos: 1, color: P.duoB }],
-        }),
-      });
-    } else {
-      pal = palDraftActive ? palDraft : PAL.get(P.paletteRef);
-      lut = palDraftActive ? R.buildLutFromColors(pal.colors) : R.buildLut(P.paletteRef);
+  // Build (or reuse) the cached scene of a pattern layer at W x H. A scene
+  // rebuild happens only when the geometry key changed; color/look changes
+  // just re-colorize + repaint.
+  function ensureScene(layer, W, H, opts) {
+    opts = opts || {};
+    const e = entryFor(layer);
+    const gk = gkeyFor(layer, W, H);
+    if (opts.force || e.gkey !== gk || !e.scene) {
+      const scaleToTarget = W / project.resW;
+      const p = layerParams(layer);
+      p.tileSize = layer.tileSize * scaleToTarget;
+      const budget = opts.budget || (layer.animation === 'none' ? 450000 : 120000);
+      e.scene = R.buildScene(p, W, H, { budget });
+      if (!e.scene) { e.gkey = null; e.ckey = null; return e; }
+      e.params = p;
+      e.scale = scaleToTarget;
+      if (e.canvas.width !== W || e.canvas.height !== H) {
+        e.canvas.width = W; e.canvas.height = H;
+        e.fx.width = W; e.fx.height = H;
+      }
+      e.gkey = gk;
+      e.ckey = null; // force recolor for the new scene
     }
-    // background is mode-scoped: palette -> its bg color (or custom),
-    // gradient -> the gradient itself (or a solid color), single/duotone -> custom color
-    let bg, bgPaint = null;
-    const bgSrc = (mode === 'palette' || mode === 'gradient') ? P.bgSource : 'custom';
-    if (mode === 'gradient' && bgSrc === 'gradient') {
-      bg = GR.sample(grad, 0.5);
-      bgPaint = (ctx, W, H) => {
-        const g = GR.toCanvas(ctx, grad, W, H, 0);
-        if (g && g.conic) GR.fillConic(ctx, grad, W, H);
-        else { ctx.fillStyle = g; ctx.fillRect(0, 0, W, H); }
-      };
-    } else if (mode === 'palette' && bgSrc === 'theme') {
-      bg = pal.bg;
-    } else {
-      bg = P.bgColor;
-    }
-    // outline: palette's own outline (when lineAuto) -> auto -> manual
-    const palOutline = pal && pal.outline != null ? pal.outline : null;
-    const line = P.lineAuto ? (palOutline || PAL.autoLineColor(bg)) : P.lineColor;
-    const look = {
-      lut, line, bg, gap: P.gap, outlineWidth: P.outlineWidth,
-      alpha: Math.max(0, Math.min(1, (P.fgAlpha == null ? 100 : +P.fgAlpha) / 100)),
-    };
-    if (bgPaint) look.bgPaint = bgPaint;
-    return look;
+    if (e.ckey !== ckeyFor(layer)) recolorEntry(layer, e);
+    return e;
   }
 
-  function fxParams() {
-    return { ...P.effects };
+  // re-colorize + rebuild look/animator + repaint the scene canvas. Params
+  // are rebuilt from the LAYER (not the build-time snapshot) so animation
+  // speed/direction/map changes apply without a geometry rebuild.
+  function recolorEntry(layer, e) {
+    const p = layerParams(layer);
+    p.tileSize = layer.tileSize * (e.scale != null ? e.scale : e.scene.W / project.resW);
+    p.colorMap = currentMap(layer);
+    R.colorize(e.scene, p);
+    e.params = p;
+    e.look = makeLayerLook(layer);
+    e.animator = R.makeAnimator(e.scene, p, e.look);
+    e.ckey = ckeyFor(layer);
+    R.paintScene(e.ctx, e.scene, p, e.look);
+  }
+
+  function anyAnimating() {
+    return LT.patternLayers(project).some((l) => l.visible && l.animation !== 'none');
   }
 
   function regenerate() {
@@ -694,112 +741,144 @@
     canvas.width = ps.w; canvas.height = ps.h;
     canvas.style.width = ps.cssW + 'px';
     canvas.style.height = ps.cssH + 'px';
-    sceneCanvas.width = ps.w; sceneCanvas.height = ps.h;
 
     const t0 = performance.now();
-    const scaleToTarget = ps.w / P.resW;
-    const p = Object.assign({}, P, { tileSize: P.tileSize * scaleToTarget });
-    const budget = (P.animation === 'none' ? 450000 : 120000);
-    scene = R.buildScene(p, ps.w, ps.h, { budget });
-    if (!scene) { statusEl.textContent = 'failed to build tiling'; return; }
-    p.colorMap = currentMap();
-    R.colorize(scene, p);
-    look = makeLook();
-    animator = R.makeAnimator(scene, p, look);
+    let built = 0, tiles = 0;
+    for (const layer of LT.patternLayers(project)) {
+      if (!layer.visible) continue;
+      const e = ensureScene(layer, ps.w, ps.h);
+      if (e.scene) {
+        built++;
+        tiles += (e.scene.kind === 'hat') ? e.scene.hats.length : e.scene.tiles.length;
+      }
+    }
     const ms = (performance.now() - t0).toFixed(0);
-
-    let status = '';
-    if (scene.kind === 'hat') {
-      status = `level ${scene.level} · ${scene.hats.length.toLocaleString()} tiles · ${ms} ms` + (scene.degraded ? ' · (best effort fit)' : '');
-    } else {
-      status = `${scene.tiles.length.toLocaleString()} tiles · ${ms} ms`;
-      if (scene.coarse > 1.01) status += ` · scale ×${scene.coarse.toFixed(1)} (budget)`;
+    const nPat = LT.patternLayers(project).length;
+    if (performance.now() >= noticeUntil) {
+      statusEl.textContent = `${nPat} pattern layer${nPat > 1 ? 's' : ''} · ${built} visible · ` +
+        `${tiles.toLocaleString()} tiles · ${ms} ms`;
     }
-    statusEl.textContent = status;
 
-    // the scene is ready: refresh family-aware arrangement options
+    // scenes are ready: refresh family-aware arrangement options
     syncMapSelects();
+    composeFrame(0, false);
+    cancelAnimationFrame(animRaf);
+    if (anyAnimating()) animRaf = requestAnimationFrame(loop);
+  }
 
-    // paint the static scene once (transparent bg; background comes from Effects)
-    R.paintScene(sceneCtx, scene, p, look);
-    composeFrame(0);
-    if (P.animation !== 'none') {
-      cancelAnimationFrame(animRaf);
-      animRaf = requestAnimationFrame(loop);
+  function composeFrame(t, live) {
+    compositeComposition(canvas.getContext('2d'), canvas.width, canvas.height, t, !!live, null);
+  }
+
+  /*
+   * Render the full layer stack onto targetCtx (shared by the live preview
+   * and every export):
+   *   1. Background layer fill (its own opacity; skipped when hidden —
+   *      transparency then survives into PNG/APNG)
+   *   2. each visible pattern layer bottom-to-top: per-layer effects into a
+   *      scratch surface, then drawn with the layer's opacity
+   * Single visible fully-opaque layer over a visible background uses the
+   * legacy FX.compose fast path (one compose, no intermediate blit).
+   * parts: prepared layer renders (export path); null -> build from cache.
+   * matte: optional pre-fill color for formats without alpha (GIF).
+   */
+  function compositeComposition(ctx, W, H, t, live, parts, matte) {
+    const bg = LT.bgLayer(project);
+    if (!parts) {
+      parts = [];
+      for (const layer of LT.patternLayers(project)) {
+        if (!layer.visible || layer.opacity <= 0) continue;
+        const e = ensureScene(layer, W, H);
+        if (!e.scene) continue;
+        parts.push({ layer, canvas: e.canvas, sctx: e.ctx, look: e.look,
+          animator: e.animator, fxCanvas: e.fx, fxCtx: e.fxCtx });
+      }
     }
-  }
+    const bgOn = !!(bg && bg.visible && bg.opacity > 0);
+    const vis = parts.filter((p) => p.layer.visible && p.layer.opacity > 0);
+    ctx.clearRect(0, 0, W, H);
+    if (matte) { ctx.fillStyle = matte; ctx.fillRect(0, 0, W, H); }
 
-  function composeFrame(t) {
-    const ctx = canvas.getContext('2d');
-    FX.compose(ctx, sceneCanvas, scene.W, scene.H, look, fxParams(),
-      animator && animator.overlayFn ? (c) => animator.overlayFn(c, t) : null);
-  }
+    const fast = bgOn && vis.length === 1 && vis[0].layer.opacity === 100 && !matte;
+    if (fast) {
+      const p = vis[0];
+      if (live && p.animator && p.animator.perTile) {
+        p.sctx.clearRect(0, 0, W, H);
+        p.animator.frame(p.sctx, t);
+      }
+      const overlay = (live && p.animator && p.animator.overlayFn) ? (c) => p.animator.overlayFn(c, t) : null;
+      FX.compose(ctx, p.canvas, W, H, p.look, p.layer.effects, overlay);
+      return;
+    }
 
-  // live re-color: recompute the tile map and/or the color LUT and repaint
-  // the scene canvas without rebuilding tiling geometry (cheap enough to
-  // run on every color-input event)
-  function recolor(rebuildMap) {
-    if (!scene) return;
-    if (rebuildMap) R.colorize(scene, Object.assign({}, P, { colorMap: currentMap() }));
-    look = makeLook();
-    animator = R.makeAnimator(scene, P, look);
-    R.paintScene(sceneCtx, scene, P, look);
-    composeFrame(performance.now());
+    if (bgOn) {
+      ctx.save();
+      ctx.globalAlpha = bg.opacity / 100;
+      paintBackgroundFill(ctx, W, H);
+      ctx.restore();
+    }
+    for (const p of vis) {
+      if (live && p.animator && p.animator.perTile) {
+        p.sctx.clearRect(0, 0, W, H);
+        p.animator.frame(p.sctx, t);
+      }
+      const overlay = (live && p.animator && p.animator.overlayFn) ? (c) => p.animator.overlayFn(c, t) : null;
+      FX.composeLayer(p.fxCtx, p.canvas, W, H, p.look, p.layer.effects, overlay);
+      ctx.save();
+      ctx.globalAlpha = p.layer.opacity / 100;
+      ctx.drawImage(p.fxCanvas, 0, 0, W, H);
+      ctx.restore();
+    }
   }
 
   function loop(t) {
     animRaf = requestAnimationFrame(loop);
-    if (P.animation === 'none') return;
-    if (animator && animator.perTile) {
-      sceneCtx.clearRect(0, 0, scene.W, scene.H);
-      animator.frame(sceneCtx, t);
+    if (!anyAnimating()) { cancelAnimationFrame(animRaf); animRaf = 0; return; }
+    composeFrame(t, true);
+  }
+
+  // live re-color of one layer: rebuild its map/LUT/animator and repaint its
+  // scene canvas without touching geometry (cheap enough for input events)
+  function recolor(layer) {
+    layer = layer || SP();
+    const e = ensureScene(layer, canvas.width, canvas.height);
+    if (!e.scene) return;
+    recolorEntry(layer, e);
+    composeFrame(performance.now(), true);
+  }
+  // re-color every visible layer (background fill changed -> looks change)
+  function recolorAll() {
+    for (const layer of LT.patternLayers(project)) {
+      if (!layer.visible) continue;
+      const e = ensureScene(layer, canvas.width, canvas.height);
+      if (e.scene) recolorEntry(layer, e);
     }
-    composeFrame(t);
+    composeFrame(performance.now(), true);
   }
 
   let refreshTimer = 0;
   function refresh() {
     clearTimeout(refreshTimer);
-    refreshTimer = setTimeout(() => {
-      cancelAnimationFrame(animRaf);
-      regenerate();
-    }, 120);
+    refreshTimer = setTimeout(regenerate, 120);
+  }
+
+  // transient status message that survives the next debounced regenerate
+  let noticeUntil = 0;
+  function notice(text) {
+    statusEl.textContent = text;
+    noticeUntil = performance.now() + 2000;
   }
 
   /* ------------------------------------------------------- export */
 
-  async function exportPNG() {
-    statusEl.textContent = 'rendering full resolution…';
-    await new Promise((r) => setTimeout(r, 30));
-    const t0 = performance.now();
-    const off = document.createElement('canvas');
-    off.width = P.resW; off.height = P.resH;
-    const offScene = document.createElement('canvas');
-    offScene.width = P.resW; offScene.height = P.resH;
-    const p = Object.assign({}, P, { animation: 'none' });
-    p.colorMap = currentMap();
-    const sc = R.buildScene(p, P.resW, P.resH, { budget: 500000 });
-    if (!sc) { statusEl.textContent = 'export failed'; return; }
-    R.colorize(sc, p);
-    const lk = makeLook();
-    const sctx = offScene.getContext('2d');
-    R.paintScene(sctx, sc, p, lk);
-    FX.compose(off.getContext('2d'), offScene, P.resW, P.resH, lk, fxParams());
-    off.toBlob((blob) => {
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = `${famTag()}-${P.resW}x${P.resH}.png`;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-      const n = sc.kind === 'hat' ? sc.hats.length : sc.tiles.length;
-      statusEl.textContent = `PNG saved · ${n.toLocaleString()} tiles · ${(performance.now() - t0).toFixed(0)} ms`;
-    }, 'image/png');
-  }
-
-  /* ------------------------------------------- animated exports */
-
   const tickAsync = () => new Promise((r) => setTimeout(r, 0));
-  function famTag() { return P.family === 'hat' ? 'einstein' : P.family; }
+  function famTag() {
+    const pats = LT.patternLayers(project);
+    if (pats.length > 1) return 'stack' + pats.length;
+    const l = pats[0];
+    if (!l) return 'wallpaper';
+    return l.family === 'hat' ? 'einstein' : l.family;
+  }
   function downloadBlob(blob, name) {
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
@@ -808,52 +887,107 @@
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
   }
 
-  // Shared animated-export pipeline: the scene is rebuilt at the EXACT
-  // canvas resolution chosen by the user (same geometry math as PNG export
-  // and the preview — scale factor 1:1), then frames are rendered by
-  // stepping the animation deterministically through one seamless loop.
-  function buildLoopExport() {
-    const W = P.resW, H = P.resH;
-    const p = Object.assign({}, P);
-    p.colorMap = currentMap();
-    const sc = R.buildScene(p, W, H, { budget: P.animation === 'none' ? 500000 : 200000 });
-    if (!sc) return null;
-    R.colorize(sc, p);
-    const lk = makeLook();
-    const animator = R.makeAnimator(sc, p, lk);
-    const sceneC = document.createElement('canvas');
-    sceneC.width = W; sceneC.height = H;
-    const sctx = sceneC.getContext('2d');
+  // Build every visible pattern layer fresh at the EXACT export resolution
+  // (same geometry math as the preview — scale factor 1:1).
+  function buildExportParts(W, H) {
+    const parts = [];
+    for (const layer of LT.patternLayers(project)) {
+      if (!layer.visible || layer.opacity <= 0) continue;
+      const p = layerParams(layer);
+      const staticAnim = layer.animation === 'none';
+      const sc = R.buildScene(p, W, H, { budget: staticAnim ? 500000 : 200000 });
+      if (!sc) continue;
+      p.colorMap = currentMap(layer);
+      R.colorize(sc, p);
+      const lk = makeLayerLook(layer);
+      const c = document.createElement('canvas');
+      c.width = W; c.height = H;
+      const sctx = c.getContext('2d');
+      // paint the static scene ONCE: per-tile animations repaint it per
+      // frame, overlay/static renders composite this painted base
+      R.paintScene(sctx, sc, p, lk);
+      const animator = R.makeAnimator(sc, p, lk);
+      const fxC = document.createElement('canvas');
+      fxC.width = W; fxC.height = H;
+      parts.push({ layer, canvas: c, sctx, look: lk, animator,
+        fxCanvas: fxC, fxCtx: fxC.getContext('2d') });
+    }
+    return parts;
+  }
+
+  async function exportPNG() {
+    statusEl.textContent = 'rendering full resolution…';
+    await new Promise((r) => setTimeout(r, 30));
+    const t0 = performance.now();
+    const W = project.resW, H = project.resH;
+    const off = document.createElement('canvas');
+    off.width = W; off.height = H;
+    const parts = buildExportParts(W, H);
+    if (!parts.length && !(LT.bgLayer(project).visible)) {
+      statusEl.textContent = 'export failed: nothing visible';
+      return;
+    }
+    compositeComposition(off.getContext('2d'), W, H, 0, false, parts);
+    off.toBlob((blob) => {
+      downloadBlob(blob, `${famTag()}-${W}x${H}.png`);
+      const n = parts.reduce((a, p) => a + (p.canvas ? 1 : 0), 0);
+      statusEl.textContent = `PNG saved · ${n} layer${n > 1 ? 's' : ''} · ${W}x${H} · ${(performance.now() - t0).toFixed(0)} ms`;
+    }, 'image/png');
+  }
+
+  /*
+   * Animated exports: one seamless combined loop. The slowest animated
+   * layer defines the loop length; faster layers get an integer number of
+   * cycles via a per-layer time warp (visually unchanged speed); overly
+   * long combinations are uniformly compressed. Frames composite the full
+   * stack (background fill + all visible pattern layers).
+   */
+  function prepareLoopExport(W, H, matte) {
+    const parts = buildExportParts(W, H);
+    if (!parts.length) return null;
+    const plan = LT.planLoop(parts.map((p) => (p.animator && p.animator.periodMs) || 0));
+    const bg = LT.bgLayer(project);
     const outC = document.createElement('canvas');
     outC.width = W; outC.height = H;
     const octx = outC.getContext('2d');
-    // paint the static scene ONCE into the scene canvas: per-tile
-    // animations repaint it every frame, overlay animations (flow /
-    // glow wave) and static exports composite this painted base
-    R.paintScene(sctx, sc, p, lk);
+    const bgOn = bg.visible && bg.opacity > 0;
+    const fast = !matte && bgOn && parts.length === 1 && parts[0].layer.opacity === 100;
     const renderAt = (t) => {
-      const overlay = animator && animator.overlayFn ? (c) => animator.overlayFn(c, t) : null;
-      if (animator && animator.perTile) {
-        sctx.clearRect(0, 0, W, H);
-        animator.frame(sctx, t);
+      if (fast) {
+        const p = parts[0];
+        const tw = t * (plan.warps[0] || 1);
+        if (p.animator && p.animator.perTile) {
+          p.sctx.clearRect(0, 0, W, H);
+          p.animator.frame(p.sctx, tw);
+        }
+        const overlay = (p.animator && p.animator.overlayFn) ? (c) => p.animator.overlayFn(c, tw) : null;
+        FX.compose(octx, p.canvas, W, H, p.look, p.layer.effects, overlay);
+        return;
       }
-      FX.compose(octx, sceneC, W, H, lk, fxParams(), overlay);
+      octx.clearRect(0, 0, W, H);
+      if (matte) { octx.fillStyle = matte; octx.fillRect(0, 0, W, H); }
+      if (bgOn) {
+        octx.save();
+        octx.globalAlpha = bg.opacity / 100;
+        paintBackgroundFill(octx, W, H);
+        octx.restore();
+      }
+      for (let i = 0; i < parts.length; i++) {
+        const p = parts[i];
+        const tw = t * (plan.warps[i] || 1);
+        if (p.animator && p.animator.perTile) {
+          p.sctx.clearRect(0, 0, W, H);
+          p.animator.frame(p.sctx, tw);
+        }
+        const overlay = (p.animator && p.animator.overlayFn) ? (c) => p.animator.overlayFn(c, tw) : null;
+        FX.composeLayer(p.fxCtx, p.canvas, W, H, p.look, p.layer.effects, overlay);
+        octx.save();
+        octx.globalAlpha = p.layer.opacity / 100;
+        octx.drawImage(p.fxCanvas, 0, 0, W, H);
+        octx.restore();
+      }
     };
-    return { W, H, sc, octx, renderAt, animator };
-  }
-
-  // pick frame count x delay (whole centiseconds) so that
-  // frames x delay x 10ms lands closest to the true loop period
-  function solveLoopTiming(periodMs) {
-    let best = null;
-    for (let d = 3; d <= 15; d++) {
-      const f = Math.round(periodMs / (d * 10));
-      if (f < 2 || f > 200) continue;
-      const err = Math.abs(f * d * 10 - periodMs);
-      if (!best || err < best.err) best = { d, f, err };
-    }
-    if (!best) best = { d: 6, f: Math.max(2, Math.min(200, Math.round(periodMs / 60))) };
-    return { frames: best.f, delayCs: best.d };
+    return { W, H, octx, renderAt, plan, parts };
   }
 
   let gifBusy = false;
@@ -865,15 +999,14 @@
     try {
       statusEl.textContent = 'rendering GIF frames…';
       await tickAsync();
-      const prep = buildLoopExport();
+      // GIF has no partial alpha: transparent projects are flattened on black
+      const prep = prepareLoopExport(project.resW, project.resH, '#000000');
       if (!prep) { statusEl.textContent = 'GIF export failed'; return; }
-      const { W, H, octx, renderAt, animator } = prep;
-      const period = animator && animator.periodMs ? animator.periodMs : 0;
-      let frames = 1, delayCs = 0;
-      if (period > 0) ({ frames, delayCs } = solveLoopTiming(period));
+      const { W, H, octx, renderAt, plan } = prep;
+      const frames = plan.frames, delayCs = plan.delayCs;
 
       // one global palette from a spread of sample frames keeps colors
-      // stable across the animation (no per-frame palette flicker)
+      // stable across the animation (no palette flicker)
       const nS = Math.min(frames, 12);
       const samples = [];
       for (let s = 0; s < nS; s++) {
@@ -895,7 +1028,9 @@
       const bytes = writer.finish();
       downloadBlob(new Blob([bytes], { type: 'image/gif' }),
         `${famTag()}-live-${frames}f-${W}x${H}.gif`);
-      statusEl.textContent = `GIF saved · ${frames} frame${frames > 1 ? 's' : ''} · ${W}x${H} · ${(bytes.length / 1048576).toFixed(1)} MB`;
+      const note = plan.compressed < 1 ? ' · loop compressed' : '';
+      statusEl.textContent = `GIF saved · ${frames} frame${frames > 1 ? 's' : ''} · ${W}x${H} · ` +
+        `${(bytes.length / 1048576).toFixed(1)} MB${note}`;
     } finally {
       btn.textContent = orig;
       gifBusy = false;
@@ -911,12 +1046,10 @@
     try {
       statusEl.textContent = 'rendering APNG frames…';
       await tickAsync();
-      const prep = buildLoopExport();
+      const prep = prepareLoopExport(project.resW, project.resH, null); // alpha preserved
       if (!prep) { statusEl.textContent = 'APNG export failed'; return; }
-      const { W, H, octx, renderAt, animator } = prep;
-      const period = animator && animator.periodMs ? animator.periodMs : 0;
-      let frames = 1, delayCs = 0;
-      if (period > 0) ({ frames, delayCs } = solveLoopTiming(period));
+      const { W, H, octx, renderAt, plan } = prep;
+      const frames = plan.frames, delayCs = plan.delayCs;
       const enc = new AP.ApngEncoder(W, H, { totalFrames: frames, delayNum: delayCs * 10, delayDen: 1000 });
       enc.start();
       for (let i = 0; i < frames; i++) {
@@ -928,68 +1061,84 @@
       const bytes = enc.finish();
       downloadBlob(new Blob([bytes], { type: 'image/apng' }),
         `${famTag()}-live-${frames}f-${W}x${H}.png`);
-      statusEl.textContent = `APNG saved · ${frames} frame${frames > 1 ? 's' : ''} · ${W}x${H} · ${(bytes.length / 1048576).toFixed(1)} MB (lossless)`;
+      const note = plan.compressed < 1 ? ' · loop compressed' : '';
+      statusEl.textContent = `APNG saved · ${frames} frame${frames > 1 ? 's' : ''} · ${W}x${H} · ` +
+        `${(bytes.length / 1048576).toFixed(1)} MB (lossless)${note}`;
     } finally {
       btn.textContent = orig;
       apngBusy = false;
     }
   }
 
-  /* ------------------------------------------------ randomize */
+  /* ------------------------------------------------ randomize/reset */
 
   function randomize() {
     const rr = Math.random;
-    // family: keep hat prominent
-    P.family = rr() < 0.35 ? 'hat' : TL.FAMILIES[1 + Math.floor(rr() * (TL.FAMILIES.length - 1))].id;
-    const fam = currentFamily();
-    P.variant = fam.variants[Math.floor(rr() * fam.variants.length)].id;
+    const layer = SL();
+    if (!layer) return;
+    if (layer.type === 'background') {
+      const src = ['solid', 'gradient', 'palette'][Math.floor(rr() * 3)];
+      layer.bg.source = src;
+      if (src === 'gradient') {
+        const all = GR.all();
+        layer.bg.gradientId = all[Math.floor(rr() * all.length)].id;
+      } else if (src === 'palette') {
+        const nC = CP.count();
+        layer.bg.paletteRef = (nC && rr() < 0.25)
+          ? { kind: 'custom', id: CP.list()[Math.floor(rr() * nC)].id }
+          : { kind: 'builtin', index: Math.floor(rr() * PAL.LIST.length) };
+      } else {
+        const vivid = ['#0b1020', '#071018', '#1a0e14', '#0e1a12', '#241432', '#10141c'];
+        layer.bg.color = vivid[Math.floor(rr() * vivid.length)];
+      }
+      save(); syncControls(); recolorAll();
+      notice('Randomized "Background"');
+      return;
+    }
+    // pattern layer
+    layer.family = rr() < 0.35 ? 'hat' : TL.FAMILIES[1 + Math.floor(rr() * (TL.FAMILIES.length - 1))].id;
+    const fam = TL.get(layer.family);
+    layer.variant = fam.variants[Math.floor(rr() * fam.variants.length)].id;
     const vivid = ['#5bc8ff', '#ff8bd2', '#ffe14d', '#6be3a2', '#b07bff', '#ff8a5b', '#4dffb8', '#f4777f'];
     const tm = rr();
-    P.themeMode = tm < 0.45 ? 'palette' : tm < 0.72 ? 'gradient' : tm < 0.9 ? 'duotone' : 'single';
-    // drop unsaved edits — randomize starts from templates
-    palDraftActive = false; gradDraftActive = false;
-    if (P.themeMode === 'palette') {
-      const nB = PAL.LIST.length, nC = CP.count();
-      P.paletteRef = (nC && rr() < 0.25)
+    layer.theme.mode = tm < 0.45 ? 'palette' : tm < 0.72 ? 'gradient' : tm < 0.9 ? 'duotone' : 'single';
+    const d = draftFor(layer.id);
+    d.pal.active = false; d.grad.active = false;
+    if (layer.theme.mode === 'palette') {
+      const nC = CP.count();
+      layer.theme.paletteRef = (nC && rr() < 0.25)
         ? { kind: 'custom', id: CP.list()[Math.floor(rr() * nC)].id }
-        : { kind: 'builtin', index: Math.floor(rr() * nB) };
-      const pOpts = arrOptions('palette');
-      P.colorMap = pOpts[Math.floor(rr() * pOpts.length)];
-      P.bgSource = rr() < 0.85 ? 'theme' : 'custom';
-    } else if (P.themeMode === 'gradient') {
+        : { kind: 'builtin', index: Math.floor(rr() * PAL.LIST.length) };
+      const pOpts = arrOptions(layer, 'palette');
+      layer.theme.colorMap = pOpts[Math.floor(rr() * pOpts.length)];
+    } else if (layer.theme.mode === 'gradient') {
       const all = GR.all();
-      P.gradientId = all[Math.floor(rr() * all.length)].id;
+      layer.theme.gradientId = all[Math.floor(rr() * all.length)].id;
       const gm = rr();
-      P.gradMap = gm < 0.55 ? 'sweep' : gm < 0.8 ? 'bands' : 'random';
-      P.gradBands = 3 + Math.floor(rr() * 6);
-      P.bgSource = rr() < 0.4 ? 'gradient' : 'custom';
-    } else if (P.themeMode === 'duotone') {
-      P.duoA = vivid[Math.floor(rr() * vivid.length)];
-      P.duoB = PAL.hslRotate(P.duoA, 110 + rr() * 140);
-      P.duoMap = ['checker', 'sweep', 'random'][Math.floor(rr() * 3)];
-      P.bgColor = PAL.shade(P.duoA, 0.22);
+      layer.theme.gradMap = gm < 0.55 ? 'sweep' : gm < 0.8 ? 'bands' : 'random';
+      layer.theme.gradBands = 3 + Math.floor(rr() * 6);
+    } else if (layer.theme.mode === 'duotone') {
+      layer.theme.duoA = vivid[Math.floor(rr() * vivid.length)];
+      layer.theme.duoB = PAL.hslRotate(layer.theme.duoA, 110 + rr() * 140);
+      layer.theme.duoMap = ['checker', 'sweep', 'random'][Math.floor(rr() * 3)];
     } else {
-      P.singleColor = vivid[Math.floor(rr() * vivid.length)];
-      P.bgColor = PAL.shade(P.singleColor, 0.2);
+      layer.theme.singleColor = vivid[Math.floor(rr() * vivid.length)];
     }
-    // reload drafts so the editors show the freshly applied templates
-    palDraftActive = false; gradDraftActive = false;
-    loadPalDraft(); loadGradDraft();
-    P.fgAlpha = rr() < 0.8 ? 100 : 55 + Math.round(rr() * 40);
-    P.animation = ['none', 'shimmer', 'flow', 'glowwave'][Math.floor(rr() * 4)];
-    P.flowAngle = Math.floor(rr() * 24) * 15;
-    P.rotation = Math.floor(rr() * 24) * 15;
-    P.tileSize = Math.round(16 + rr() * 60);
-    P.gap = rr() < 0.6 ? 0 : +(rr() * 0.05).toFixed(3);
-    P.seed = Math.floor(rr() * 99999);
-    P.effects = { ...FX_DEFAULTS };
+    layer.opacity = rr() < 0.8 ? 100 : 55 + Math.round(rr() * 40);
+    layer.animation = ['none', 'shimmer', 'flow', 'glowwave'][Math.floor(rr() * 4)];
+    layer.flowAngle = Math.floor(rr() * 24) * 15;
+    layer.rotation = Math.floor(rr() * 24) * 15;
+    layer.tileSize = Math.round(16 + rr() * 60);
+    layer.gap = rr() < 0.6 ? 0 : +(rr() * 0.05).toFixed(3);
+    layer.seed = Math.floor(rr() * 99999);
+    layer.effects = { ...LT.FX_DEFAULTS };
     if (rr() < 0.4) {
       const pick = ['glow', 'vignette', 'grain', 'shadow'][Math.floor(rr() * 4)];
-      P.effects[pick] = pick === 'glow' ? 20 + rr() * 25 : pick === 'grain' ? 8 + rr() * 12 : 25 + rr() * 25;
+      layer.effects[pick] = pick === 'glow' ? 20 + rr() * 25 : pick === 'grain' ? 8 + rr() * 12 : 25 + rr() * 25;
     }
-    syncControls();
-    refresh();
-    save();
+    ensureMapValid(layer);
+    save(); syncControls(); refresh();
+    notice(`Randomized "${layer.name}" (selected layer only)`);
   }
 
   function fullscreen() {
@@ -998,73 +1147,297 @@
     else document.exitFullscreen();
   }
 
+  /* --------------------------------------------- layers panel UI */
+
+  function buildLayersPanel() {
+    const box = $('layerList');
+    box.innerHTML = '';
+    const pats = LT.patternLayers(project);
+    for (const layer of project.layers) {
+      const row = document.createElement('div');
+      row.className = 'layerrow' + (project.selected === layer.id ? ' on' : '') +
+        (layer.visible ? '' : ' hiddenL') + (layer.type === 'background' ? ' locked' : '');
+      const eye = document.createElement('button');
+      eye.className = 'eye';
+      eye.textContent = layer.visible ? '◉' : '○';
+      eye.title = layer.visible ? 'Hide layer' : 'Show layer';
+      eye.onclick = (ev) => {
+        ev.stopPropagation();
+        layer.visible = !layer.visible;
+        save();
+        buildLayersPanel();
+        composeFrame(performance.now(), true);
+      };
+      const name = document.createElement('span');
+      name.className = 'lname';
+      name.textContent = layer.name;
+      const badge = document.createElement('span');
+      badge.className = 'lbadge';
+      badge.textContent = layer.type === 'background' ? 'bg' : String(pats.indexOf(layer) + 1);
+      const meta = document.createElement('span');
+      meta.className = 'lmeta';
+      meta.textContent = layer.type === 'background' ? bgSourceLabel(layer) : layer.opacity + '%';
+      row.append(eye, name, badge, meta);
+      row.onclick = () => selectLayer(layer.id);
+      box.appendChild(row);
+    }
+    const sel = SL();
+    const idx = sel ? project.layers.indexOf(sel) : -1;
+    $('layerAdd').disabled = pats.length >= LT.MAX_PATTERN_LAYERS;
+    $('layerDup').disabled = !sel || sel.type !== 'pattern' || pats.length >= LT.MAX_PATTERN_LAYERS;
+    $('layerDel').disabled = !sel || sel.type === 'background' || pats.length <= 1;
+    $('layerRename').disabled = !sel;
+    $('layerUp').disabled = !sel || sel.type === 'background' || idx >= project.layers.length - 1;
+    $('layerDown').disabled = !sel || sel.type === 'background' || idx <= 1;
+    $('layerOpacity').value = sel ? sel.opacity : 100;
+    $('layerOpacityVal').textContent = (sel ? sel.opacity : 100) + '%';
+  }
+
+  function addPatternLayer() {
+    const pats = LT.patternLayers(project);
+    if (pats.length >= LT.MAX_PATTERN_LAYERS) return;
+    const layer = LT.createPattern({ name: 'Pattern ' + (pats.length + 1), _n: pats.length + 1 });
+    layer.theme.gradientId = GR.BUILTINS[0].id;
+    project.layers.push(layer);
+    project.selected = layer.id;
+    save(); syncControls(); refresh();
+    notice(`Layer "${layer.name}" added`);
+  }
+  function dupLayer() {
+    const sel = SL();
+    if (!sel || sel.type !== 'pattern') return;
+    if (LT.patternLayers(project).length >= LT.MAX_PATTERN_LAYERS) return;
+    const copy = LT.duplicateLayer(sel);
+    if (!copy) return;
+    project.layers.splice(project.layers.indexOf(sel) + 1, 0, copy);
+    project.selected = copy.id;
+    const d = drafts.get(sel.id);
+    if (d) drafts.set(copy.id, JSON.parse(JSON.stringify(d)));
+    save(); syncControls(); refresh();
+    notice(`Duplicated as "${copy.name}" (new id)`);
+  }
+  function renameLayer() {
+    const sel = SL();
+    if (!sel) return;
+    const name = prompt('Layer name', sel.name);
+    if (name == null) return;
+    const trimmed = name.trim().slice(0, 40);
+    if (trimmed) sel.name = trimmed;
+    save(); syncControls();
+  }
+  function delLayer() {
+    const sel = SL();
+    if (!sel || sel.type === 'background') return;
+    if (LT.patternLayers(project).length <= 1) {
+      notice('the last pattern layer cannot be deleted');
+      return;
+    }
+    const name = sel.name;
+    LT.deleteLayer(project, sel.id);
+    cache.delete(sel.id);   // release the layer's scene/scratch canvases
+    drafts.delete(sel.id);
+    project.selected = LT.patternLayers(project)[0].id;
+    save(); syncControls(); refresh();
+    notice(`Layer "${name}" deleted`);
+  }
+  function moveSelLayer(dir) {
+    const sel = SL();
+    if (!sel) return;
+    if (LT.moveLayer(project, sel.id, dir)) {
+      save(); syncControls();
+      composeFrame(performance.now(), true);
+      notice(`Moved "${sel.name}" ${dir < 0 ? 'up' : 'down'}`);
+    }
+  }
+
   /* ------------------------------------------------- control sync */
 
-  function syncAnimVisibility() {
-    const showAngle = P.animation === 'flow' || P.animation === 'glowwave';
-    $('flowAngleRow').style.display = showAngle ? '' : 'none';
+  function showSection(id, on) {
+    const el = $(id);
+    if (el) el.style.display = on ? '' : 'none';
+  }
+  function setHint(id, name) {
+    const el = $(id);
+    if (el) el.textContent = name ? '· ' + name : '';
+  }
+
+  function buildAspectChips() {
+    const box = $('aspectChips');
+    box.innerHTML = '';
+    for (const a of ASPECTS) {
+      const b = document.createElement('button');
+      b.className = 'chip' + (project.aspect === a.id ? ' on' : '');
+      b.textContent = a.id;
+      b.title = a.r >= 1 ? 'landscape' : 'portrait';
+      b.onclick = () => {
+        project.aspect = a.id;
+        project.orientation = naturalOrientation(a);
+        applyResForAspect();
+        syncControls(); refresh(); save();
+      };
+      box.appendChild(b);
+    }
+  }
+
+  function applyResForAspect() {
+    const a = ASPECTS.find((x) => x.id === project.aspect) || ASPECTS[0];
+    const list = RES_PRESETS[project.aspect] || [[1920, 1080]];
+    const nat = naturalOrientation(a);
+    const swapped = project.orientation !== nat;
+    const eff = swapped ? list.map((r) => [r[1], r[0]]) : list;
+    if (!eff.some((r) => r[0] === project.resW && r[1] === project.resH)) {
+      project.resW = eff[0][0]; project.resH = eff[0][1];
+    }
+  }
+
+  function buildResSelect() {
+    const sel = $('resSelect');
+    const a = ASPECTS.find((x) => x.id === project.aspect) || ASPECTS[0];
+    const list0 = RES_PRESETS[project.aspect] || [[1920, 1080]];
+    const list = project.orientation !== naturalOrientation(a) ? list0.map((r) => [r[1], r[0]]) : list0;
+    sel.innerHTML = '';
+    for (const [w, h] of list) {
+      const o = document.createElement('option');
+      o.value = w + 'x' + h;
+      o.textContent = `${w} × ${h}`;
+      if (project.resW === w && project.resH === h) o.selected = true;
+      sel.appendChild(o);
+    }
+    const o = document.createElement('option');
+    o.value = 'custom';
+    o.textContent = 'Custom…';
+    if (!list.some(([w, h]) => w === project.resW && h === project.resH)) o.selected = true;
+    sel.appendChild(o);
+  }
+
+  function fillSelect(sel, pairs, value) {
+    sel.innerHTML = '';
+    for (const [v, label] of pairs) {
+      const o = document.createElement('option');
+      o.value = v; o.textContent = label;
+      if (v === value) o.selected = true;
+      sel.appendChild(o);
+    }
+  }
+
+  /* ------------------------------------------- family grid */
+
+  function buildFamilyGrid(layer) {
+    const grid = $('familyGrid');
+    grid.innerHTML = '';
+    for (const fam of TL.FAMILIES) {
+      const b = document.createElement('button');
+      b.className = 'fam' + (layer.family === fam.id ? ' on' : '');
+      b.setAttribute('role', 'option');
+      b.setAttribute('aria-selected', layer.family === fam.id ? 'true' : 'false');
+      b.title = fam.name;
+      b.innerHTML = fam.icon + `<span>${fam.name}</span>`;
+      b.onclick = () => {
+        if (layer.family === fam.id) return;
+        layer.family = fam.id;
+        layer.variant = fam.defaultVariant;
+        ensureMapValid(layer);
+        save(); syncControls(); refresh();
+      };
+      grid.appendChild(b);
+    }
   }
 
   /* --------------------------------- color theme control building */
 
-  function buildThemeControls() {
+  function buildThemeControls(layer) {
     const box = $('themeModeChips');
     box.innerHTML = '';
     for (const [m, label] of THEME_MODES) {
       const b = document.createElement('button');
-      b.className = 'chip' + (P.themeMode === m ? ' on' : '');
+      b.className = 'chip' + (layer.theme.mode === m ? ' on' : '');
       b.textContent = label;
       b.onclick = () => setThemeMode(m);
       box.appendChild(b);
     }
-    ensureMapValid();
+    ensureMapValid(layer);
     syncMapSelects();
-    $('gradBands').value = P.gradBands;
-    $('gradBandsVal').textContent = P.gradBands;
-    $('singleColor').value = P.singleColor;
-    $('duoA').value = P.duoA;
-    $('duoB').value = P.duoB;
-    buildGradPick();
-    buildSingleTpls();
-    buildDuoTpls();
-    const bgSel = $('bgSource');
-    if (P.themeMode === 'palette') {
-      fillSelect(bgSel, [['theme', 'From palette'], ['custom', 'Custom color']],
-        P.bgSource === 'gradient' ? 'theme' : P.bgSource);
-    } else if (P.themeMode === 'gradient') {
-      fillSelect(bgSel, [['custom', 'Solid color'], ['gradient', 'Gradient']],
-        P.bgSource === 'theme' ? 'custom' : P.bgSource);
-    }
-    $('bgColor').value = P.bgColor;
-    $('fgAlpha').value = P.fgAlpha;
-    $('fgAlphaVal').textContent = P.fgAlpha + '%';
-    syncThemeVisibility();
+    $('gradBands').value = layer.theme.gradBands;
+    $('gradBandsVal').textContent = layer.theme.gradBands;
+    $('singleColor').value = layer.theme.singleColor;
+    $('duoA').value = layer.theme.duoA;
+    $('duoB').value = layer.theme.duoB;
+    fillGradientSelect($('gradPick'), layer.theme.gradientId || GR.BUILTINS[0].id);
+    buildSingleTpls(layer);
+    buildDuoTpls(layer);
+    $('lineAuto').checked = layer.lineAuto;
+    $('lineColor').value = layer.lineColor;
+    $('lineColor').disabled = layer.lineAuto;
+    syncThemeVisibility(layer);
   }
 
   // fill the per-mode arrangement selects from the family-aware option lists
   function syncMapSelects() {
-    fillSelect($('palMap'), arrOptions('palette').map((m) => [m, MAP_LABELS[m] || m]), P.colorMap);
-    fillSelect($('gradMapSel'), arrOptions('gradient').map((m) => [m, MAP_LABELS[m] || m]), P.gradMap);
-    fillSelect($('duoMapSel'), arrOptions('duotone').map((m) => [m, MAP_LABELS[m] || m]), P.duoMap);
+    const layer = SP();
+    if (!layer) return;
+    fillSelect($('palMap'), arrOptions(layer, 'palette').map((m) => [m, MAP_LABELS[m] || m]), layer.theme.colorMap);
+    fillSelect($('gradMapSel'), arrOptions(layer, 'gradient').map((m) => [m, MAP_LABELS[m] || m]), layer.theme.gradMap);
+    fillSelect($('duoMapSel'), arrOptions(layer, 'duotone').map((m) => [m, MAP_LABELS[m] || m]), layer.theme.duoMap);
   }
 
-  // show only the panel (and rows) that belong to the active theme mode
-  function syncThemeVisibility() {
-    const mode = P.themeMode;
+  // show only the panel (and rows) that belong to the layer's theme mode
+  function syncThemeVisibility(layer) {
+    const mode = layer.theme.mode;
     const show = (id, on) => { $(id).style.display = on ? '' : 'none'; };
     show('panel-single', mode === 'single');
     show('panel-palette', mode === 'palette');
     show('panel-gradient', mode === 'gradient');
     show('panel-duotone', mode === 'duotone');
-    show('gradBandsRow', mode === 'gradient' && P.gradMap === 'bands');
-    show('bgSourceWrap', mode === 'palette' || mode === 'gradient');
-    show('bgColorWrap', mode === 'single' || mode === 'duotone' || P.bgSource === 'custom');
-    show('bgRow', !(mode === 'palette' && P.bgSource === 'theme'));
+    show('gradBandsRow', mode === 'gradient' && layer.theme.gradMap === 'bands');
   }
-  function syncFamilyVisibility() {
-    const isLine = P.family === 'lines';
+
+  function syncFamilyVisibility(layer) {
+    const isLine = layer.family === 'lines';
     $('gapRow').style.display = isLine ? 'none' : '';
     $('outlineRow').style.display = isLine ? 'none' : '';
+  }
+
+  function syncAnimVisibility(layer) {
+    const showAngle = layer.animation === 'flow' || layer.animation === 'glowwave';
+    $('flowAngleRow').style.display = showAngle ? '' : 'none';
+  }
+
+  /* -------------------------------------- background layer controls */
+
+  function buildBgPalGrid(layer) {
+    const grid = $('bgPalGrid');
+    grid.innerHTML = '';
+    const mk = (pal, ref) => {
+      const b = document.createElement('button');
+      const on = sameRef(layer.bg.paletteRef, ref);
+      b.className = 'swatch' + (on ? ' on' : '');
+      b.title = pal.name + (ref.kind === 'custom' ? ' (custom)' : '');
+      b.style.background = `linear-gradient(135deg, ${pal.colors.join(',')})`;
+      b.style.borderColor = on ? '#fff' : 'rgba(255,255,255,.15)';
+      b.onclick = () => {
+        layer.bg.paletteRef = ref;
+        save(); syncControls(); recolorAll();
+      };
+      return b;
+    };
+    PAL.LIST.forEach((palB, i) => grid.appendChild(mk(palB, { kind: 'builtin', index: i })));
+    const customs = CP.list();
+    if (customs.length) {
+      const sep = document.createElement('div');
+      sep.className = 'swatch-sep';
+      grid.appendChild(sep);
+      for (const p of customs) grid.appendChild(mk(p, { kind: 'custom', id: p.id }));
+    }
+  }
+
+  function syncBackgroundControls(layer) {
+    $('bgFillSource').value = layer.bg.source;
+    $('bgFillColor').value = layer.bg.color;
+    fillGradientSelect($('bgFillGradient'), layer.bg.gradientId || GR.BUILTINS[0].id);
+    buildBgPalGrid(layer);
+    $('bgSolidRow').style.display = layer.bg.source === 'solid' ? '' : 'none';
+    $('bgGradRow').style.display = layer.bg.source === 'gradient' ? '' : 'none';
+    $('bgPalRow').style.display = layer.bg.source === 'palette' ? '' : 'none';
   }
 
   function setSlider(id, valId, v, fmt) {
@@ -1072,23 +1445,20 @@
     $(valId).textContent = fmt(v);
   }
 
-  function syncControls() {
-    buildAspectChips();
-    buildResSelect();
-    buildFamilyGrid();
-    buildPaletteGrid();
-    const fam = currentFamily();
-    fillSelect($('variantSelect'), fam.variants.map((v) => [v.id, v.name]), P.variant);
-    fillSelect($('animSelect'), ANIMS, P.animation);
-    buildThemeControls();
-    setSlider('tileSize', 'tileSizeVal', P.tileSize, (v) => v + ' px');
-    setSlider('rotation', 'rotationVal', P.rotation, (v) => v + '°');
-    setSlider('gap', 'gapVal', Math.round(P.gap * 100), (v) => v + '%');
-    setSlider('outlineWidth', 'outlineWidthVal', P.outlineWidth, (v) => (+v).toFixed(1) + ' px');
-    setSlider('animSpeed', 'animSpeedVal', P.animSpeed, (v) => (+v).toFixed(1) + '×');
-    setSlider('flowAngle', 'flowAngleVal', P.flowAngle, (v) => v + '°');
-    setSlider('seed', 'seedVal', P.seed, (v) => '#' + v);
-    const fx = P.effects;
+  function syncPatternControls(layer) {
+    buildFamilyGrid(layer);
+    const fam = TL.get(layer.family);
+    fillSelect($('variantSelect'), fam.variants.map((v) => [v.id, v.name]), layer.variant);
+    fillSelect($('animSelect'), ANIMS, layer.animation);
+    buildThemeControls(layer);
+    setSlider('tileSize', 'tileSizeVal', layer.tileSize, (v) => v + ' px');
+    setSlider('rotation', 'rotationVal', layer.rotation, (v) => v + '°');
+    setSlider('gap', 'gapVal', Math.round(layer.gap * 100), (v) => v + '%');
+    setSlider('outlineWidth', 'outlineWidthVal', layer.outlineWidth, (v) => (+v).toFixed(1) + ' px');
+    setSlider('animSpeed', 'animSpeedVal', layer.animSpeed, (v) => (+v).toFixed(1) + '×');
+    setSlider('flowAngle', 'flowAngleVal', layer.flowAngle, (v) => v + '°');
+    setSlider('seed', 'seedVal', layer.seed, (v) => '#' + v);
+    const fx = layer.effects;
     setSlider('fxBlur', 'fxBlurVal', fx.blur, (v) => (+v) + ' px');
     setSlider('fxGlow', 'fxGlowVal', fx.glow, (v) => Math.round(v) + '%');
     setSlider('fxGlowRadius', 'fxGlowRadiusVal', fx.glowRadius, (v) => v + ' px');
@@ -1098,18 +1468,36 @@
     setSlider('fxGrain', 'fxGrainVal', fx.grain, (v) => Math.round(v) + '%');
     setSlider('fxVignette', 'fxVignetteVal', fx.vignette, (v) => Math.round(v) + '%');
     $('fxVignetteMode').value = fx.vignetteMode;
-    $('resW').value = P.resW; $('resH').value = P.resH;
-    $('lineAuto').checked = P.lineAuto;
-    $('lineColor').value = P.lineColor;
-    $('lineColor').disabled = P.lineAuto;
+    syncAnimVisibility(layer);
+    syncFamilyVisibility(layer);
+    buildPaletteGrid(layer);
+    renderPalEditor(layer);
+    renderGradEditor(layer);
+    syncGradEditState(layer);
+  }
+
+  function syncControls() {
+    buildAspectChips();
+    buildResSelect();
+    buildLayersPanel();
+    const layer = SL();
+    const isPat = !!(layer && layer.type === 'pattern');
+    showSection('sec-tiling', isPat);
+    showSection('sec-theme', isPat);
+    showSection('sec-fx', isPat);
+    showSection('sec-anim', isPat);
+    showSection('sec-bgprops', !isPat);
+    setHint('hintTiling', layer && layer.name);
+    setHint('hintTheme', isPat && layer.name);
+    setHint('hintFx', isPat && layer.name);
+    setHint('hintAnim', isPat && layer.name);
+    $('resW').value = project.resW;
+    $('resH').value = project.resH;
     const orBtns = document.querySelectorAll('[data-orient]');
-    orBtns.forEach((b) => b.classList.toggle('on', b.dataset.orient === P.orientation));
-    syncAnimVisibility();
-    syncFamilyVisibility();
-    renderPalEditor();
-    renderGradEditor();
-    syncGradEditState();
-    $('palEditState').textContent = palDraftActive ? 'edited · live' : '';
+    orBtns.forEach((b) => b.classList.toggle('on', b.dataset.orient === project.orientation));
+    if (!layer) return;
+    if (isPat) syncPatternControls(layer);
+    else syncBackgroundControls(layer);
   }
 
   /* ------------------------------------------------------- bind */
@@ -1118,183 +1506,264 @@
     $('resSelect').onchange = (e) => {
       if (e.target.value === 'custom') { $('resW').focus(); return; }
       const [w, h] = e.target.value.split('x').map(Number);
-      P.resW = w; P.resH = h;
+      project.resW = w; project.resH = h;
       $('resW').value = w; $('resH').value = h;
       refresh(); save();
     };
     const resChanged = () => {
-      P.resW = Math.max(64, Math.min(8192, +$('resW').value || P.resW));
-      P.resH = Math.max(64, Math.min(8192, +$('resH').value || P.resH));
+      project.resW = Math.max(64, Math.min(8192, +$('resW').value || project.resW));
+      project.resH = Math.max(64, Math.min(8192, +$('resH').value || project.resH));
       refresh(); save();
     };
     $('resW').onchange = resChanged;
     $('resH').onchange = resChanged;
     document.querySelectorAll('[data-orient]').forEach((b) => {
       b.onclick = () => {
-        P.orientation = b.dataset.orient;
+        project.orientation = b.dataset.orient;
         applyResForAspect();
         syncControls(); refresh(); save();
       };
     });
-    $('tileSize').oninput = (e) => { P.tileSize = +e.target.value; $('tileSizeVal').textContent = P.tileSize + ' px'; refresh(); save(); };
-    $('rotation').oninput = (e) => { P.rotation = +e.target.value; $('rotationVal').textContent = P.rotation + '°'; refresh(); save(); };
-    $('gap').oninput = (e) => { P.gap = e.target.value / 100; $('gapVal').textContent = e.target.value + '%'; refresh(); save(); };
-    $('outlineWidth').oninput = (e) => { P.outlineWidth = +e.target.value; $('outlineWidthVal').textContent = (+e.target.value).toFixed(1) + ' px'; refresh(); save(); };
-    $('animSpeed').oninput = (e) => { P.animSpeed = +e.target.value; $('animSpeedVal').textContent = (+e.target.value).toFixed(1) + '×'; save(); };
-    $('flowAngle').oninput = (e) => { P.flowAngle = +e.target.value; $('flowAngleVal').textContent = P.flowAngle + '°'; save(); };
-    $('seed').oninput = (e) => { P.seed = +e.target.value || 1; $('seedVal').textContent = '#' + P.seed; refresh(); save(); };
-    $('animSelect').onchange = (e) => { P.animation = e.target.value; syncAnimVisibility(); refresh(); save(); };
-    $('variantSelect').onchange = (e) => { P.variant = e.target.value; refresh(); save(); };
 
-    // ---- color theme: per-mode arrangements ----
-    $('palMap').onchange = (e) => { P.colorMap = e.target.value; recolor(true); save(); };
-    $('gradMapSel').onchange = (e) => { P.gradMap = e.target.value; syncThemeVisibility(); recolor(true); save(); };
-    $('duoMapSel').onchange = (e) => { P.duoMap = e.target.value; recolor(true); save(); };
-    $('gradBands').oninput = (e) => { P.gradBands = Math.max(2, Math.min(12, +e.target.value || 5)); $('gradBandsVal').textContent = P.gradBands; recolor(true); save(); };
-    $('singleColor').oninput = (e) => { P.singleColor = e.target.value; buildSingleTpls(); recolor(false); save(); };
-    $('duoA').oninput = (e) => { P.duoA = e.target.value; buildDuoTpls(); recolor(false); save(); };
-    $('duoB').oninput = (e) => { P.duoB = e.target.value; buildDuoTpls(); recolor(false); save(); };
-    $('gradPick').onchange = (e) => applyGradientId(e.target.value);
-    $('bgSource').onchange = (e) => { P.bgSource = e.target.value; syncThemeVisibility(); recolor(false); save(); };
-    $('bgColor').oninput = (e) => { P.bgColor = e.target.value; recolor(false); save(); };
-    $('fgAlpha').oninput = (e) => {
-      P.fgAlpha = Math.max(0, Math.min(100, +e.target.value || 0));
-      $('fgAlphaVal').textContent = P.fgAlpha + '%';
-      recolor(false); save();
+    // ---- layers panel ----
+    $('layerAdd').onclick = addPatternLayer;
+    $('layerDup').onclick = dupLayer;
+    $('layerRename').onclick = renameLayer;
+    $('layerDel').onclick = delLayer;
+    $('layerUp').onclick = () => moveSelLayer(1);
+    $('layerDown').onclick = () => moveSelLayer(-1);
+    $('layerOpacity').oninput = (e) => {
+      const sel = SL();
+      if (!sel) return;
+      sel.opacity = Math.max(0, Math.min(100, Math.round(+e.target.value || 0)));
+      $('layerOpacityVal').textContent = sel.opacity + '%';
+      composeFrame(performance.now(), true);
+      save();
+      const meta = $('layerList').children[project.layers.indexOf(sel)];
+      if (meta) meta.querySelector('.lmeta').textContent =
+        sel.type === 'background' ? bgSourceLabel(sel) : sel.opacity + '%';
     };
-    $('lineAuto').onchange = (e) => { P.lineAuto = e.target.checked; $('lineColor').disabled = P.lineAuto; recolor(false); save(); };
-    $('lineColor').oninput = (e) => { P.lineColor = e.target.value; recolor(false); save(); };
+
+    // ---- background layer props ----
+    $('bgFillSource').onchange = (e) => {
+      const l = SL();
+      if (!l || l.type !== 'background') return;
+      l.bg.source = e.target.value;
+      save(); syncControls(); recolorAll();
+    };
+    $('bgFillColor').oninput = (e) => {
+      const l = SL();
+      if (!l || l.type !== 'background') return;
+      l.bg.color = e.target.value;
+      save(); recolorAll();
+    };
+    $('bgFillGradient').onchange = (e) => {
+      const l = SL();
+      if (!l || l.type !== 'background') return;
+      l.bg.gradientId = e.target.value;
+      save(); recolorAll();
+    };
+
+    // ---- tiling (selected pattern layer) ----
+    $('tileSize').oninput = (e) => { const l = SP(); l.tileSize = +e.target.value; $('tileSizeVal').textContent = l.tileSize + ' px'; refresh(); save(); };
+    $('rotation').oninput = (e) => { const l = SP(); l.rotation = +e.target.value; $('rotationVal').textContent = l.rotation + '°'; refresh(); save(); };
+    $('gap').oninput = (e) => { const l = SP(); l.gap = e.target.value / 100; $('gapVal').textContent = e.target.value + '%'; recolor(l); save(); };
+    $('outlineWidth').oninput = (e) => { const l = SP(); l.outlineWidth = +e.target.value; $('outlineWidthVal').textContent = (+e.target.value).toFixed(1) + ' px'; recolor(l); save(); };
+    $('seed').oninput = (e) => { const l = SP(); l.seed = +e.target.value || 1; $('seedVal').textContent = '#' + l.seed; refresh(); save(); };
+    $('animSpeed').oninput = (e) => { const l = SP(); l.animSpeed = +e.target.value; $('animSpeedVal').textContent = (+e.target.value).toFixed(1) + '×'; recolor(l); save(); };
+    $('flowAngle').oninput = (e) => { const l = SP(); l.flowAngle = +e.target.value; $('flowAngleVal').textContent = l.flowAngle + '°'; recolor(l); save(); };
+    $('animSelect').onchange = (e) => { const l = SP(); l.animation = e.target.value; syncAnimVisibility(l); refresh(); save(); };
+    $('variantSelect').onchange = (e) => { const l = SP(); l.variant = e.target.value; refresh(); save(); };
+
+    // ---- color theme: per-mode arrangements (selected layer) ----
+    $('palMap').onchange = (e) => { const l = SP(); l.theme.colorMap = e.target.value; recolor(l); save(); };
+    $('gradMapSel').onchange = (e) => { const l = SP(); l.theme.gradMap = e.target.value; syncThemeVisibility(l); recolor(l); save(); };
+    $('duoMapSel').onchange = (e) => { const l = SP(); l.theme.duoMap = e.target.value; recolor(l); save(); };
+    $('gradBands').oninput = (e) => { const l = SP(); l.theme.gradBands = Math.max(2, Math.min(12, +e.target.value || 5)); $('gradBandsVal').textContent = l.theme.gradBands; recolor(l); save(); };
+    $('singleColor').oninput = (e) => { const l = SP(); l.theme.singleColor = e.target.value; buildSingleTpls(l); recolor(l); save(); };
+    $('duoA').oninput = (e) => { const l = SP(); l.theme.duoA = e.target.value; buildDuoTpls(l); recolor(l); save(); };
+    $('duoB').oninput = (e) => { const l = SP(); l.theme.duoB = e.target.value; buildDuoTpls(l); recolor(l); save(); };
+    $('gradPick').onchange = (e) => applyGradientId(SP(), e.target.value);
+    $('lineAuto').onchange = (e) => { const l = SP(); l.lineAuto = e.target.checked; $('lineColor').disabled = l.lineAuto; recolor(l); save(); };
+    $('lineColor').oninput = (e) => { const l = SP(); l.lineColor = e.target.value; recolor(l); save(); };
 
     // ---- single / duotone template save/delete ----
     $('singleTplSave').onclick = () => {
-      if (!singleStore.list().includes(P.singleColor)) {
-        singleStore.add(P.singleColor);
-        buildSingleTpls();
+      const l = SP();
+      if (!singleStore.list().includes(l.theme.singleColor)) {
+        singleStore.add(l.theme.singleColor);
+        buildSingleTpls(l);
         statusEl.textContent = 'single-color template saved';
       } else statusEl.textContent = 'already saved';
     };
     $('singleTplDelete').onclick = () => {
-      const i = singleStore.list().indexOf(P.singleColor);
-      if (i >= 0) { singleStore.remove(i); buildSingleTpls(); statusEl.textContent = 'template deleted'; }
+      const l = SP();
+      const i = singleStore.list().indexOf(l.theme.singleColor);
+      if (i >= 0) { singleStore.remove(i); buildSingleTpls(l); statusEl.textContent = 'template deleted'; }
       else statusEl.textContent = 'select a custom template first';
     };
     $('duoTplSave').onclick = () => {
+      const l = SP();
       const list = duoStore.list();
-      if (!list.some((p) => p.a === P.duoA && p.b === P.duoB)) {
-        duoStore.add({ a: P.duoA, b: P.duoB });
-        buildDuoTpls();
+      if (!list.some((p) => p.a === l.theme.duoA && p.b === l.theme.duoB)) {
+        duoStore.add({ a: l.theme.duoA, b: l.theme.duoB });
+        buildDuoTpls(l);
         statusEl.textContent = 'duotone template saved';
       } else statusEl.textContent = 'already saved';
     };
     $('duoTplDelete').onclick = () => {
+      const l = SP();
       const list = duoStore.list();
-      const i = list.findIndex((p) => p.a === P.duoA && p.b === P.duoB);
-      if (i >= 0) { duoStore.remove(i); buildDuoTpls(); statusEl.textContent = 'template deleted'; }
+      const i = list.findIndex((p) => p.a === l.theme.duoA && p.b === l.theme.duoB);
+      if (i >= 0) { duoStore.remove(i); buildDuoTpls(l); statusEl.textContent = 'template deleted'; }
       else statusEl.textContent = 'select a custom template first';
     };
 
     // ---- palette editor (inline in Palette mode) ----
     $('palAddColor').onclick = () => {
-      if (palDraft.colors.length < CP.MAX_COLORS) {
-        palDraft.colors.push('#88aacc');
-        palDraftActive = true;
-        $('palEditState').textContent = 'edited · live';
-        buildPaletteGrid(); renderPalEditor(); recolor(false); save();
+      const l = SP();
+      const d = draftFor(l.id);
+      if (!d.pal.draft) loadPalDraft(l);
+      if (d.pal.draft.colors.length < CP.MAX_COLORS) {
+        d.pal.draft.colors.push('#88aacc');
+        palEdited(l);
+        buildPaletteGrid(l); renderPalEditor(l); recolor(l); save();
       }
     };
     $('palDraftReset').onclick = () => {
-      palDraftActive = false;
-      loadPalDraft();
+      const l = SP();
+      const d = draftFor(l.id);
+      d.pal.active = false;
+      loadPalDraft(l);
       $('palEditState').textContent = '';
-      buildPaletteGrid(); renderPalEditor(); recolor(false); save();
+      buildPaletteGrid(l); renderPalEditor(l); recolor(l); save();
     };
-    $('palBg').oninput = (e) => { palDraft.bg = e.target.value; palDraftActive = true; $('palEditState').textContent = 'edited · live'; recolor(false); save(); };
-    $('palOutline').oninput = (e) => { palDraft.outline = e.target.value; palDraftActive = true; $('palEditState').textContent = 'edited · live'; recolor(false); save(); };
+    $('palBg').oninput = (e) => {
+      const l = SP();
+      const d = draftFor(l.id);
+      if (!d.pal.draft) loadPalDraft(l);
+      d.pal.draft.bg = e.target.value;
+      palEdited(l); recolor(l); save();
+    };
+    $('palOutline').oninput = (e) => {
+      const l = SP();
+      const d = draftFor(l.id);
+      if (!d.pal.draft) loadPalDraft(l);
+      d.pal.draft.outline = e.target.value;
+      palEdited(l); recolor(l); save();
+    };
     $('palOutlineAuto').onclick = () => {
-      palDraft.outline = null; palDraftActive = true;
-      $('palEditState').textContent = 'edited · live';
-      renderPalEditor(); recolor(false); save();
+      const l = SP();
+      const d = draftFor(l.id);
+      if (!d.pal.draft) loadPalDraft(l);
+      d.pal.draft.outline = null;
+      palEdited(l);
+      renderPalEditor(l); recolor(l); save();
     };
     $('palSave').onclick = () => {
-      const draft = JSON.parse(JSON.stringify(palDraft));
-      if (P.paletteRef.kind === 'custom' && palDraftActive) {
-        CP.update(P.paletteRef.id, draft);
+      const l = SP();
+      const d = draftFor(l.id);
+      if (!d.pal.draft) loadPalDraft(l);
+      const draft = JSON.parse(JSON.stringify(d.pal.draft));
+      if (l.theme.paletteRef.kind === 'custom' && d.pal.active) {
+        CP.update(l.theme.paletteRef.id, draft);
         statusEl.textContent = 'custom palette updated';
       } else {
         const created = CP.create({ ...draft, name: draft.name + ' (custom)' });
-        if (created) P.paletteRef = { kind: 'custom', id: created.id };
+        if (created) l.theme.paletteRef = { kind: 'custom', id: created.id };
         statusEl.textContent = 'palette saved as custom';
       }
-      palDraftActive = false;
-      loadPalDraft();
-      save(); syncControls(); recolor(false);
+      d.pal.active = false;
+      loadPalDraft(l);
+      save(); syncControls(); recolor(l);
     };
     $('palDuplicate').onclick = () => {
-      const src = P.paletteRef.kind === 'custom' ? P.paletteRef.id : null;
-      const created = src ? CP.duplicate(src) : CP.create(JSON.parse(JSON.stringify(palDraft)));
+      const l = SP();
+      const d = draftFor(l.id);
+      if (!d.pal.draft) loadPalDraft(l);
+      const src = l.theme.paletteRef.kind === 'custom' ? l.theme.paletteRef.id : null;
+      const created = src ? CP.duplicate(src) : CP.create(JSON.parse(JSON.stringify(d.pal.draft)));
       if (created) {
-        P.paletteRef = { kind: 'custom', id: created.id };
-        palDraftActive = false; loadPalDraft();
-        buildPaletteGrid(); renderPalEditor();
+        l.theme.paletteRef = { kind: 'custom', id: created.id };
+        d.pal.active = false; loadPalDraft(l);
+        buildPaletteGrid(l); renderPalEditor(l);
       }
       statusEl.textContent = 'palette duplicated';
-      save(); recolor(false);
+      save(); recolor(l);
     };
     $('palDelete').onclick = () => {
-      if (P.paletteRef.kind !== 'custom') { statusEl.textContent = 'built-in palettes cannot be deleted'; return; }
-      CP.remove(P.paletteRef.id);
-      P.paletteRef = { kind: 'builtin', index: 0 };
-      palDraftActive = false; loadPalDraft();
+      const l = SP();
+      if (l.theme.paletteRef.kind !== 'custom') { statusEl.textContent = 'built-in palettes cannot be deleted'; return; }
+      CP.remove(l.theme.paletteRef.id);
+      l.theme.paletteRef = { kind: 'builtin', index: 0 };
+      const d = draftFor(l.id);
+      d.pal.active = false; loadPalDraft(l);
       syncControls(); refresh(); save();
       statusEl.textContent = 'palette deleted';
     };
 
     // ---- gradient editor (inline in Gradient mode) ----
     $('gradType').onchange = (e) => {
-      gradDraft.type = e.target.value;
-      gradDraftActive = true; syncGradEditState();
-      renderGradPreview(); recolor(false); save();
+      const l = SP();
+      const d = draftFor(l.id);
+      if (!d.grad.draft) loadGradDraft(l);
+      d.grad.draft.type = e.target.value;
+      gradEdited(l);
+      renderGradPreview(l); recolor(l); save();
     };
     $('gradAngle').oninput = (e) => {
-      gradDraft.angle = +e.target.value;
-      $('gradAngleVal').textContent = gradDraft.angle + '°';
-      gradDraftActive = true; syncGradEditState();
-      renderGradPreview(); recolor(false); save();
+      const l = SP();
+      const d = draftFor(l.id);
+      if (!d.grad.draft) loadGradDraft(l);
+      d.grad.draft.angle = +e.target.value;
+      $('gradAngleVal').textContent = d.grad.draft.angle + '°';
+      gradEdited(l);
+      renderGradPreview(l); recolor(l); save();
     };
     $('gradAddStop').onclick = () => {
-      if (gradDraft.stops.length < 16) {
-        gradDraft.stops.push({ pos: 1, color: '#88aacc' });
-        gradDraft.stops.sort((a, b) => a.pos - b.pos);
-        gradDraftActive = true; syncGradEditState();
-        renderGradEditor(); recolor(false); save();
+      const l = SP();
+      const d = draftFor(l.id);
+      if (!d.grad.draft) loadGradDraft(l);
+      if (d.grad.draft.stops.length < 16) {
+        d.grad.draft.stops.push({ pos: 1, color: '#88aacc' });
+        d.grad.draft.stops.sort((a, b) => a.pos - b.pos);
+        gradEdited(l);
+        renderGradEditor(l); recolor(l); save();
       }
     };
     $('gradDraftReset').onclick = () => {
-      gradDraftActive = false;
-      loadGradDraft();
-      syncGradEditState();
-      renderGradEditor(); recolor(false); save();
+      const l = SP();
+      const d = draftFor(l.id);
+      d.grad.active = false;
+      loadGradDraft(l);
+      syncGradEditState(l);
+      renderGradEditor(l); recolor(l); save();
     };
     $('gradSave').onclick = () => {
-      const g = JSON.parse(JSON.stringify(gradDraft));
-      const editingCustom = gradDraftActive && gradEditId && !GR.BUILTINS.some((x) => x.id === gradEditId);
-      const saved = GR.save(editingCustom ? { ...g, id: gradEditId } : g);
-      P.gradientId = saved.id;
-      gradEditId = saved.id;
-      gradDraftActive = false;
-      loadGradDraft();
-      save(); syncControls(); recolor(false);
+      const l = SP();
+      const d = draftFor(l.id);
+      if (!d.grad.draft) loadGradDraft(l);
+      const g = JSON.parse(JSON.stringify(d.grad.draft));
+      const editingCustom = d.grad.active && d.grad.editId && !GR.BUILTINS.some((x) => x.id === d.grad.editId);
+      const saved = GR.save(editingCustom ? { ...g, id: d.grad.editId } : g);
+      l.theme.gradientId = saved.id;
+      d.grad.editId = saved.id;
+      d.grad.active = false;
+      loadGradDraft(l);
+      save(); syncControls(); recolor(l);
       statusEl.textContent = editingCustom ? 'custom gradient updated' : 'gradient saved as custom';
     };
     $('gradDelete').onclick = () => {
-      if (!gradEditId || GR.BUILTINS.some((g) => g.id === gradEditId)) {
+      const l = SP();
+      const d = draftFor(l.id);
+      if (!d.grad.editId || GR.BUILTINS.some((g) => g.id === d.grad.editId)) {
         statusEl.textContent = 'built-in gradients cannot be deleted';
         return;
       }
-      GR.remove(gradEditId);
-      P.gradientId = GR.BUILTINS[0].id;
-      gradDraftActive = false; loadGradDraft();
-      syncControls(); recolor(false); save();
+      GR.remove(d.grad.editId);
+      l.theme.gradientId = GR.BUILTINS[0].id;
+      d.grad.active = false; loadGradDraft(l);
+      syncControls(); recolor(l); save();
       statusEl.textContent = 'gradient deleted';
     };
 
@@ -1304,12 +1773,7 @@
         single: singleStore.list(),
         duo: duoStore.list(),
       });
-      const blob = new Blob([json], { type: 'application/json' });
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = 'einstein-wallpaper-themes.json';
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+      downloadBlob(new Blob([json], { type: 'application/json' }), 'einstein-wallpaper-themes.json');
       statusEl.textContent = 'themes exported';
     };
     $('themeImport').onclick = () => $('themeFile').click();
@@ -1323,8 +1787,8 @@
           if (res.extras) {
             if (Array.isArray(res.extras.single)) res.extras.single.forEach((c) => { if (GR.isHexColor(c) && !singleStore.list().includes(c)) singleStore.add(c); });
             if (Array.isArray(res.extras.duo)) res.extras.duo.forEach((p) => { if (p && GR.isHexColor(p.a) && GR.isHexColor(p.b) && !duoStore.list().some((q) => q.a === p.a && q.b === p.b)) duoStore.add(p); });
-            buildSingleTpls(); buildDuoTpls();
           }
+          fixProjectRefs(project);
           syncControls(); refresh(); save();
           statusEl.textContent = `imported ${res.palettes} palettes, ${res.gradients} gradients` +
             (res.extras ? `, ${res.extras.single.length || 0} single + ${res.extras.duo.length || 0} duotone templates` : '');
@@ -1336,26 +1800,26 @@
       e.target.value = '';
     };
 
-    // ---- effects ----
-    const fxBind = (id, key, valId, fmt, immediate) => {
+    // ---- effects (selected layer) ----
+    const fxBind = (id, key, valId, fmt) => {
       $(id).oninput = (e) => {
-        P.effects[key] = +e.target.value;
+        const l = SP();
+        l.effects[key] = +e.target.value;
         $(valId).textContent = fmt(+e.target.value);
-        if (immediate) composeFrame(performance.now());
+        // post-processing only: recompose reusing the painted scene canvases
+        composeFrame(performance.now(), true);
         save();
       };
     };
-    // `true` = recompose immediately on input (post-processing only, the
-    // painted scene canvas is reused, so this is cheap and gives live feedback)
-    fxBind('fxBlur', 'blur', 'fxBlurVal', (v) => v + ' px', true);
-    fxBind('fxGlow', 'glow', 'fxGlowVal', (v) => Math.round(v) + '%', true);
-    fxBind('fxGlowRadius', 'glowRadius', 'fxGlowRadiusVal', (v) => v + ' px', true);
-    fxBind('fxShadow', 'shadow', 'fxShadowVal', (v) => Math.round(v) + '%', true);
-    fxBind('fxShadowSoft', 'shadowSoft', 'fxShadowSoftVal', (v) => v + ' px', true);
-    fxBind('fxShadowOff', 'shadowOff', 'fxShadowOffVal', (v) => v + ' px', true);
-    fxBind('fxGrain', 'grain', 'fxGrainVal', (v) => Math.round(v) + '%', true);
-    fxBind('fxVignette', 'vignette', 'fxVignetteVal', (v) => Math.round(v) + '%', true);
-    $('fxVignetteMode').onchange = (e) => { P.effects.vignetteMode = e.target.value; composeFrame(performance.now()); save(); };
+    fxBind('fxBlur', 'blur', 'fxBlurVal', (v) => v + ' px');
+    fxBind('fxGlow', 'glow', 'fxGlowVal', (v) => Math.round(v) + '%');
+    fxBind('fxGlowRadius', 'glowRadius', 'fxGlowRadiusVal', (v) => v + ' px');
+    fxBind('fxShadow', 'shadow', 'fxShadowVal', (v) => Math.round(v) + '%');
+    fxBind('fxShadowSoft', 'shadowSoft', 'fxShadowSoftVal', (v) => v + ' px');
+    fxBind('fxShadowOff', 'shadowOff', 'fxShadowOffVal', (v) => v + ' px');
+    fxBind('fxGrain', 'grain', 'fxGrainVal', (v) => Math.round(v) + '%');
+    fxBind('fxVignette', 'vignette', 'fxVignetteVal', (v) => Math.round(v) + '%');
+    $('fxVignetteMode').onchange = (e) => { SP().effects.vignetteMode = e.target.value; composeFrame(performance.now(), true); save(); };
 
     $('randomBtn').onclick = randomize;
     $('pngBtn').onclick = exportPNG;
@@ -1363,10 +1827,12 @@
     $('apngBtn').onclick = exportAPNG;
     $('fsBtn').onclick = fullscreen;
     $('resetBtn').onclick = () => {
-      P = JSON.parse(JSON.stringify(DEFAULTS));
-      palDraftActive = false; gradDraftActive = false;
-      loadPalDraft(); loadGradDraft();
+      project = LT.defaultProject();
+      project.layers[1].theme.gradientId = GR.BUILTINS[0].id;
+      cache.clear();
+      drafts.clear();
       save(); syncControls(); refresh();
+      notice('Project reset (all layers)');
     };
     document.addEventListener('keydown', (e) => {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
@@ -1377,11 +1843,9 @@
     document.addEventListener('fullscreenchange', () => { setTimeout(refresh, 60); });
   }
 
+  /* ------------------------------------------------------- init */
+
   bind();
-  // default gradient selection
-  if (!P.gradientId || !GR.find(P.gradientId)) P.gradientId = GR.BUILTINS[0].id;
-  loadPalDraft();
-  loadGradDraft();
   syncControls();
   regenerate();
 })();

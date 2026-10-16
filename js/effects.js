@@ -3,6 +3,8 @@
  *
  * Pipeline (shared by live preview, PNG export and animated exports):
  *   1. paint background (solid color or gradient) onto the target canvas
+ *      (compose() only — composeLayer() starts from transparency for per-layer
+ *      compositing)
  *   2. composite the scene canvas once, with optional blur filter and/or
  *      drop shadow (ctx.shadow*) — the scene canvas has a transparent
  *      background so shadows follow tile silhouettes
@@ -68,9 +70,14 @@
    *  fx: effect settings (all optional)
    *  overlayFn: optional (ctx) => drawn after scene+glow, before grain/vignette
    *             (used by the Gradient Flow / Glow Wave animations)
+   *
+   * composeLayer(...): the same effect passes on a TRANSPARENT target — used
+   * per layer in the multi-layer compositor (the layer result is later drawn
+   * onto the shared output with its own opacity). On a transparent target the
+   * grain and vignette passes use 'source-atop' so they only tint the layer's
+   * own pixels and never paint haze into transparent regions.
    */
-  function compose(targetCtx, sceneCanvas, W, H, look, fx, overlayFn) {
-    fx = fx || {};
+  function passes(targetCtx, sceneCanvas, W, H, fx, overlayFn, atopGrainVignette) {
     // Percent-scale settings arrive as 0–100 (slider units); normalize them to
     // 0–1 alphas so the sliders modulate strength continuously instead of
     // acting as on/off switches.
@@ -82,8 +89,6 @@
     const shadowOff = +fx.shadowOff || 8;
     const grain = Math.min(1, (+fx.grain || 0) / 100);
     const vignette = Math.min(1, (+fx.vignette || 0) / 100);
-
-    paintBackground(targetCtx, W, H, look, fx);
 
     // scene composite: optional blur + shadow in one pass
     targetCtx.save();
@@ -110,10 +115,10 @@
     // animation overlay (between scene and grain/vignette)
     if (overlayFn) overlayFn(targetCtx);
 
-    // grain
+    // grain ('source-atop' on transparent layer targets: tint own pixels only)
     if (grain > 0) {
       targetCtx.save();
-      targetCtx.globalCompositeOperation = 'overlay';
+      targetCtx.globalCompositeOperation = atopGrainVignette ? 'source-atop' : 'overlay';
       targetCtx.globalAlpha = grain;
       const pat = targetCtx.createPattern(getGrain(), 'repeat');
       targetCtx.fillStyle = pat;
@@ -124,6 +129,7 @@
     // vignette
     if (vignette > 0) {
       targetCtx.save();
+      if (atopGrainVignette) targetCtx.globalCompositeOperation = 'source-atop';
       const light = fx.vignetteMode === 'light';
       const inner = light ? 0.55 : 0.25;
       const grad = targetCtx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * inner, W / 2, H / 2, Math.hypot(W, H) / 2);
@@ -141,5 +147,16 @@
     }
   }
 
-  root.Effects = { compose, paintBackground };
+  function compose(targetCtx, sceneCanvas, W, H, look, fx, overlayFn) {
+    fx = fx || {};
+    paintBackground(targetCtx, W, H, look, fx);
+    passes(targetCtx, sceneCanvas, W, H, fx, overlayFn, false);
+  }
+
+  function composeLayer(targetCtx, sceneCanvas, W, H, look, fx, overlayFn) {
+    // no background paint: the target stays transparent
+    passes(targetCtx, sceneCanvas, W, H, fx || {}, overlayFn, true);
+  }
+
+  root.Effects = { compose, composeLayer, paintBackground };
 })(typeof window !== 'undefined' ? window : globalThis);

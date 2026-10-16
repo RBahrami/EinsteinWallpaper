@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Einstein Wallpaper — Geometric Wallpaper Studio</title>
-<meta name="description" content="Geometric wallpaper studio: the aperiodic Einstein hat tile plus 13 more tiling families, a unified color theme system (single, palette, gradient, duotone), visual effects, animations. Export PNG, looping GIF or lossless APNG live wallpapers.">
+<meta name="description" content="Geometric wallpaper studio with a multi-layer compositor: stack pattern layers over a background layer, each with its own tiling family, color theme, effects and animation. Export PNG, looping GIF or lossless APNG live wallpapers.">
 <link rel="stylesheet" href="css/style.css">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%230b1020'/%3E%3Cpath d='M8 10 L14 6 L20 10 L26 8 L26 16 L20 22 L12 24 L8 18 Z' fill='%235bc8ff'/%3E%3C/svg%3E">
 </head>
@@ -61,7 +61,32 @@
       </details>
 
       <details open>
-        <summary>Tiling</summary>
+        <summary>Layers</summary>
+        <div class="body">
+          <div id="layerList"></div>
+          <div class="row" id="layerOpacityRow">
+            <label>Layer opacity <output id="layerOpacityVal"></output></label>
+            <input type="range" id="layerOpacity" min="0" max="100" step="1">
+          </div>
+          <div class="btnrow tight">
+            <button id="layerAdd" class="btn mini">＋ Add</button>
+            <button id="layerDup" class="btn mini">⧉ Duplicate</button>
+            <button id="layerRename" class="btn mini">✎ Rename</button>
+          </div>
+          <div class="btnrow tight">
+            <button id="layerUp" class="btn mini">↑ Up</button>
+            <button id="layerDown" class="btn mini">↓ Down</button>
+            <button id="layerDel" class="btn mini ghost">🗑 Delete</button>
+          </div>
+          <p class="help">Click a layer to edit it in the sections below.
+            The <b>Background</b> layer is pinned to the bottom — it cannot be
+            deleted or reordered. Every pattern layer keeps its own tiling,
+            colors, effects and animation; exports render the whole stack.</p>
+        </div>
+      </details>
+
+      <details open id="sec-tiling">
+        <summary>Tiling <span class="sumhint" id="hintTiling"></span></summary>
         <div class="body">
           <div class="row">
             <label>Tiling family</label>
@@ -94,8 +119,8 @@
         </div>
       </details>
 
-      <details open>
-        <summary>Color theme</summary>
+      <details open id="sec-theme">
+        <summary>Color theme <span class="sumhint" id="hintTheme"></span></summary>
         <div class="body">
           <div class="row">
             <label>Mode</label>
@@ -229,20 +254,6 @@
           </div>
 
           <!-- ======================= SHARED ======================= -->
-          <div class="row two" id="bgRow">
-            <div id="bgSourceWrap">
-              <label for="bgSource">Background</label>
-              <select id="bgSource"></select>
-            </div>
-            <div id="bgColorWrap">
-              <label for="bgColor">Background</label>
-              <input type="color" id="bgColor" value="#0b1020">
-            </div>
-          </div>
-          <div class="row">
-            <label>Foreground opacity <output id="fgAlphaVal"></output></label>
-            <input type="range" id="fgAlpha" min="0" max="100" step="1">
-          </div>
           <div class="row two">
             <label class="check"><input type="checkbox" id="lineAuto" checked> Auto outline</label>
             <input type="color" id="lineColor" value="#101014" title="Manual outline color">
@@ -253,14 +264,46 @@
             <input type="file" id="themeFile" accept=".json,application/json" hidden>
           </div>
           <p class="help">Every mode keeps its own arrangement, editor and
-            templates; edits apply to the wallpaper live. Saved templates and
-            custom palettes/gradients persist in the browser and travel with
-            the theme export/import files.</p>
+            templates; edits apply to the <b>selected layer</b> live. The
+            wallpaper background lives on the Background layer (see the Layers
+            section). Saved templates and custom palettes/gradients persist in
+            the browser and travel with the theme export/import files.</p>
         </div>
       </details>
 
-      <details>
-        <summary>Visual effects</summary>
+      <!-- ======================= BACKGROUND LAYER ======================= -->
+      <details open id="sec-bgprops">
+        <summary>Background layer</summary>
+        <div class="body">
+          <div class="row">
+            <label for="bgFillSource">Fill</label>
+            <select id="bgFillSource">
+              <option value="solid">Solid color</option>
+              <option value="gradient">Gradient</option>
+              <option value="palette">From palette</option>
+            </select>
+          </div>
+          <div class="row" id="bgSolidRow">
+            <label for="bgFillColor">Color</label>
+            <input type="color" id="bgFillColor" value="#0b1020">
+          </div>
+          <div class="row" id="bgGradRow">
+            <label for="bgFillGradient">Gradient</label>
+            <select id="bgFillGradient"></select>
+          </div>
+          <div class="row" id="bgPalRow">
+            <label>Palette <span class="hint">defines the fill color</span></label>
+            <div id="bgPalGrid" class="swatches"></div>
+          </div>
+          <p class="help">The Background layer is always at the bottom of the
+            stack and its palette reference is explicit — recoloring a pattern
+            layer never changes it. Hide it (eye icon in Layers) or set opacity
+            below 100% to export PNG/APNG wallpapers with real transparency.</p>
+        </div>
+      </details>
+
+      <details id="sec-fx">
+        <summary>Visual effects <span class="sumhint" id="hintFx"></span></summary>
         <div class="body">
           <div class="row">
             <label>Blur <output id="fxBlurVal"></output></label>
@@ -305,13 +348,13 @@
               </select>
             </div>
           </div>
-          <p class="help">Effects apply to the live preview and to every
-            export format alike. 0 = off.</p>
+          <p class="help">Effects apply to the selected layer only — in the
+            live preview and in every export format alike. 0 = off.</p>
         </div>
       </details>
 
-      <details open>
-        <summary>Animation</summary>
+      <details open id="sec-anim">
+        <summary>Animation <span class="sumhint" id="hintAnim"></span></summary>
         <div class="body">
           <div class="row">
             <label for="animSelect">Effect</label>
@@ -325,6 +368,8 @@
             <label>Speed <output id="animSpeedVal"></output></label>
             <input type="range" id="animSpeed" min="0.2" max="3" step="0.1">
           </div>
+          <p class="help">Each layer animates independently on a shared
+            timeline. Animated exports align every layer to one seamless loop.</p>
         </div>
       </details>
 
@@ -339,10 +384,13 @@
             <button id="apngBtn" class="btn">APNG (lossless)</button>
           </div>
           <p class="help">
-            GIF and APNG render exactly one seamless animation loop at the
-            canvas resolution chosen above — no third-party software or codec
-            needed to play them. <b>GIF</b> is compact (256 colors +
-            dithering); <b>APNG</b> is pixel-perfect lossless truecolor.
+            Exports always render the complete layer stack at the canvas
+            resolution chosen above — no third-party software or codec needed
+            to play them. <b>PNG/APNG</b> keep true RGBA transparency when the
+            Background layer is hidden or faded; <b>GIF</b> has no partial
+            alpha, so transparent projects are flattened onto black.
+            <b>GIF</b> is compact (256 colors + dithering); <b>APNG</b> is
+            pixel-perfect lossless truecolor.
             <b>Windows:</b> install <i>Lively Wallpaper</i> (free) → Add
             Wallpaper → paste this page's URL as a web wallpaper, or drop the
             exported GIF/APNG in as a video wallpaper.<br>
@@ -380,6 +428,7 @@
 
 </div>
 <script src="js/hat-tiling.js"></script>
+<script src="js/layers.js"></script>
 <script src="js/tilings.js"></script>
 <script src="js/palettes.js"></script>
 <script src="js/gradients.js"></script>

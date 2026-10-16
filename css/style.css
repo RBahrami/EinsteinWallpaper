@@ -253,6 +253,45 @@ label.check input { accent-color: var(--accent); }
 /* variant chips for long lists */
 select#variantSelect { max-width: 100%; }
 
+/* ---------------- layers panel ---------------- */
+#layerList { display: flex; flex-direction: column; gap: 4px; margin: 4px 0 2px; }
+.layerrow {
+  display: flex; align-items: center; gap: 7px;
+  padding: 6px 8px;
+  background: var(--bg2); border: 1px solid var(--line); border-radius: 8px;
+  cursor: pointer; transition: border-color .12s, background .12s;
+  user-select: none;
+}
+.layerrow:hover { border-color: #3a4b66; }
+.layerrow.on { border-color: var(--accent); background: linear-gradient(160deg, rgba(91,200,255,.10), rgba(143,123,255,.08)); }
+.layerrow.locked { cursor: default; }
+.layerrow .eye {
+  width: 22px; height: 22px; flex: none; line-height: 1;
+  background: transparent; color: var(--dim);
+  border: 1px solid transparent; border-radius: 6px; cursor: pointer; font-size: 12px;
+}
+.layerrow .eye:hover { color: var(--text); border-color: #3a4b66; }
+.layerrow.hiddenL .eye { color: #565d6f; }
+.layerrow.hiddenL .lname, .layerrow.hiddenL .lmeta { opacity: .45; }
+.layerrow .lname {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--text); font-size: 12px;
+}
+.layerrow .lbadge {
+  flex: none; font-size: 9px; letter-spacing: .5px; text-transform: uppercase;
+  color: var(--dim); border: 1px solid var(--line); border-radius: 4px; padding: 1px 4px;
+}
+.layerrow .lmeta { flex: none; color: var(--dim); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+.layerrow .thumb {
+  width: 20px; height: 20px; flex: none; border-radius: 5px;
+  border: 1px solid rgba(255,255,255,.18);
+}
+.sumhint {
+  margin-left: auto; color: var(--accent); font-weight: 400;
+  text-transform: none; letter-spacing: 0; font-size: 11px;
+  max-width: 46%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
 @media (max-width: 760px) {
   .famgrid { grid-template-columns: repeat(4, 1fr); }
   .fam span { display: none; }
