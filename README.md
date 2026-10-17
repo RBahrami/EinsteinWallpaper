@@ -122,6 +122,15 @@ film Grain, and Vignette (darken or lighten edges). All default to neutral/off,
 all are applied identically to the live preview and to every export format, and
 all work with every tiling family.
 
+**Special effects** (static light passes, same export guarantees):
+- **Shimmer (light wave)** — the Shimmer animation frozen in place: soft
+  repeating light/dark bands with direction, phase and scale controls,
+- **Sheen (light sweep)** — one soft band of light across the layer
+  (angle + position),
+- **Iridescence** — a holographic rainbow sheen (angle + spread),
+- **Chromatic aberration** — red/blue channel split for a lens look,
+- **Scanlines** — CRT-style dark scanlines (strength + spacing).
+
 ### Animation (per layer)
 - **None** (static — no frames rendered),
 - **Shimmer** (soft light wave over the tiles),
@@ -244,6 +253,7 @@ js/palettes.js        built-in palette library + color helpers
 js/gradients.js       multi-stop gradient engine + persistence
 js/custom-palettes.js custom palette store + theme import/export
 js/effects.js         post-processing pipeline (blur/glow/shadow/grain/vignette)
+                      + special effects (shimmer/sheen/iridescence/aberration/scanlines)
                       incl. the per-layer composeLayer pass
 js/gif.js             dependency-free animated GIF89a encoder (median-cut
                       palette, Floyd-Steinberg dithering, LZW, loop extension)

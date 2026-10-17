@@ -146,6 +146,11 @@
     fxBlur: 'Blur', fxGlow: 'Glow', fxGlowRadius: 'Glow radius', fxShadow: 'Shadow',
     fxShadowSoft: 'Shadow softness', fxShadowOff: 'Shadow offset', fxGrain: 'Film grain',
     fxVignette: 'Vignette', fxVignetteMode: 'Vignette mode',
+    fxShimmer: 'Shimmer', fxShimmerAngle: 'Shimmer direction',
+    fxShimmerPhase: 'Shimmer phase', fxShimmerScale: 'Shimmer scale',
+    fxSheen: 'Sheen', fxSheenAngle: 'Sheen angle', fxSheenPos: 'Sheen position',
+    fxIrid: 'Iridescence', fxIridAngle: 'Iridescence axis', fxIridScale: 'Iridescence spread',
+    fxAberration: 'Chromatic aberration', fxScan: 'Scanlines', fxScanGap: 'Scanline spacing',
     animation: 'Animation', animSpeed: 'Animation speed', flowAngle: 'Animation direction',
     bgSource: 'Background fill', bgColor: 'Background color',
     bgGradTpl: 'Background gradient template', bgGradType: 'Background gradient type',
@@ -1366,7 +1371,9 @@
   }
 
   // Visual effects section: one coherent profile (mostly clean, sometimes a
-  // glow / shadow / grain+vignette / soft-focus look).
+  // glow / shadow / grain+vignette / soft-focus look) plus the occasional
+  // special-effect accent (frozen shimmer / sheen / iridescence /
+  // aberration / scanlines).
   function randomizeFx() {
     const layer = SP();
     if (!layer || layer.type !== 'pattern') return;
@@ -1389,6 +1396,28 @@
         fx.blur = 1 + rr() * 4;
         fx.glow = 10 + rr() * 20;
       }
+    }
+    // special-effect accent (independent of the base profile)
+    const sr = rr();
+    const ang = () => Math.floor(rr() * 24) * 15;
+    if (sr < 0.2) {
+      fx.shimmer = 18 + rr() * 35;
+      fx.shimmerAngle = ang();
+      fx.shimmerPhase = Math.floor(rr() * 100);
+      fx.shimmerScale = 60 + rr() * 140;
+    } else if (sr < 0.36) {
+      fx.sheen = 25 + rr() * 35;
+      fx.sheenAngle = ang();
+      fx.sheenPos = Math.floor(rr() * 100);
+    } else if (sr < 0.5) {
+      fx.irid = 15 + rr() * 30;
+      fx.iridAngle = ang();
+      fx.iridScale = 60 + rr() * 160;
+    } else if (sr < 0.56) {
+      fx.aberration = 0.5 + rr() * 2.5;
+    } else if (sr < 0.62) {
+      fx.scan = 8 + rr() * 18;
+      fx.scanGap = 3 + Math.floor(rr() * 5);
     }
     layer.effects = fx;
     save('randomFx', 'Randomize effects');
@@ -1838,6 +1867,19 @@
     setSlider('fxGrain', 'fxGrainVal', fx.grain, (v) => Math.round(v) + '%');
     setSlider('fxVignette', 'fxVignetteVal', fx.vignette, (v) => Math.round(v) + '%');
     $('fxVignetteMode').value = fx.vignetteMode;
+    setSlider('fxShimmer', 'fxShimmerVal', fx.shimmer, (v) => Math.round(v) + '%');
+    setSlider('fxShimmerAngle', 'fxShimmerAngleVal', fx.shimmerAngle, (v) => v + '°');
+    setSlider('fxShimmerPhase', 'fxShimmerPhaseVal', fx.shimmerPhase, (v) => Math.round(v) + '%');
+    setSlider('fxShimmerScale', 'fxShimmerScaleVal', fx.shimmerScale, (v) => Math.round(v) + '%');
+    setSlider('fxSheen', 'fxSheenVal', fx.sheen, (v) => Math.round(v) + '%');
+    setSlider('fxSheenAngle', 'fxSheenAngleVal', fx.sheenAngle, (v) => v + '°');
+    setSlider('fxSheenPos', 'fxSheenPosVal', fx.sheenPos, (v) => Math.round(v) + '%');
+    setSlider('fxIrid', 'fxIridVal', fx.irid, (v) => Math.round(v) + '%');
+    setSlider('fxIridAngle', 'fxIridAngleVal', fx.iridAngle, (v) => v + '°');
+    setSlider('fxIridScale', 'fxIridScaleVal', fx.iridScale, (v) => Math.round(v) + '%');
+    setSlider('fxAberration', 'fxAberrationVal', fx.aberration, (v) => v + ' px');
+    setSlider('fxScan', 'fxScanVal', fx.scan, (v) => Math.round(v) + '%');
+    setSlider('fxScanGap', 'fxScanGapVal', fx.scanGap, (v) => v + ' px');
     syncAnimVisibility(layer);
     syncFamilyVisibility(layer);
     buildPaletteGrid(layer);
@@ -2237,6 +2279,19 @@
     fxBind('fxGrain', 'grain', 'fxGrainVal', (v) => Math.round(v) + '%');
     fxBind('fxVignette', 'vignette', 'fxVignetteVal', (v) => Math.round(v) + '%');
     $('fxVignetteMode').onchange = (e) => { SP().effects.vignetteMode = e.target.value; composeFrame(performance.now(), true); save('fxVignetteMode'); };
+    fxBind('fxShimmer', 'shimmer', 'fxShimmerVal', (v) => Math.round(v) + '%');
+    fxBind('fxShimmerAngle', 'shimmerAngle', 'fxShimmerAngleVal', (v) => v + '°');
+    fxBind('fxShimmerPhase', 'shimmerPhase', 'fxShimmerPhaseVal', (v) => Math.round(v) + '%');
+    fxBind('fxShimmerScale', 'shimmerScale', 'fxShimmerScaleVal', (v) => Math.round(v) + '%');
+    fxBind('fxSheen', 'sheen', 'fxSheenVal', (v) => Math.round(v) + '%');
+    fxBind('fxSheenAngle', 'sheenAngle', 'fxSheenAngleVal', (v) => v + '°');
+    fxBind('fxSheenPos', 'sheenPos', 'fxSheenPosVal', (v) => Math.round(v) + '%');
+    fxBind('fxIrid', 'irid', 'fxIridVal', (v) => Math.round(v) + '%');
+    fxBind('fxIridAngle', 'iridAngle', 'fxIridAngleVal', (v) => v + '°');
+    fxBind('fxIridScale', 'iridScale', 'fxIridScaleVal', (v) => Math.round(v) + '%');
+    fxBind('fxAberration', 'aberration', 'fxAberrationVal', (v) => v + ' px');
+    fxBind('fxScan', 'scan', 'fxScanVal', (v) => Math.round(v) + '%');
+    fxBind('fxScanGap', 'scanGap', 'fxScanGapVal', (v) => v + ' px');
 
     // ---- section-scoped randomizers (dice in the section headers) ----
     // preventDefault/stopPropagation so clicking the dice never toggles the section

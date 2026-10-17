@@ -67,6 +67,37 @@ ok(L.createPattern({ lineAlpha: -1 }).lineAlpha === 0 && L.createPattern({ lineA
 ok(L.createPattern({ effects: { glow: 500, vignetteMode: 'light' } }).effects.vignetteMode === 'light',
   'effects sanitized', L.createPattern({ effects: { glow: 500 } }).effects);
 
+/* ---------------- special effects (fx schema) ---------------- */
+const spDef = L.createPattern({}).effects;
+ok(spDef.shimmer === 0 && spDef.shimmerAngle === 30 && spDef.shimmerPhase === 0 &&
+   spDef.shimmerScale === 100 && spDef.sheen === 0 && spDef.sheenAngle === 30 &&
+   spDef.sheenPos === 50 && spDef.irid === 0 && spDef.iridScale === 100 &&
+   spDef.iridAngle === 0 && spDef.aberration === 0 && spDef.scan === 0 && spDef.scanGap === 4,
+  'special-effect fx defaults', spDef);
+const spClamp = L.createPattern({ effects: {
+  shimmer: 500, shimmerAngle: 999, shimmerPhase: -4, shimmerScale: 0,
+  sheen: 250, sheenAngle: -30, sheenPos: 101,
+  irid: 90, iridScale: 900, iridAngle: 40, aberration: 99, scan: 12, scanGap: 1,
+} }).effects;
+ok(spClamp.shimmer === 200 && spClamp.shimmerAngle === 345 && spClamp.shimmerPhase === 0 &&
+   spClamp.shimmerScale === 20 && spClamp.sheen === 200 && spClamp.sheenAngle === 0 &&
+   spClamp.sheenPos === 100 && spClamp.irid === 90 && spClamp.iridScale === 400 &&
+   spClamp.iridAngle === 40 && spClamp.aberration === 20 && spClamp.scan === 12 &&
+   spClamp.scanGap === 2, 'special-effect fx clamped to ranges', spClamp);
+// legacy projects without special fields keep working and gain the defaults
+const legacyFx = L.sanitizeProject({ version: 2, layers: [
+  { type: 'background' },
+  { type: 'pattern', effects: { glow: 30 } },
+] }).layers[1].effects;
+ok(legacyFx.glow === 30 && legacyFx.shimmer === 0 && legacyFx.sheen === 50 - 50 &&
+   legacyFx.irid === 0 && legacyFx.aberration === 0 && legacyFx.scan === 0,
+  'legacy fx blob gains special-effect defaults', legacyFx);
+// duplicate copies special fx too
+const spSrc = L.createPattern({ effects: { shimmer: 40, sheenAngle: 90 } });
+const spDup = L.duplicateLayer(spSrc);
+ok(spDup && spDup.effects.shimmer === 40 && spDup.effects.sheenAngle === 90 &&
+   spDup.id !== spSrc.id, 'duplicate copies special-effect fx');
+
 /* ---------------- default project ---------------- */
 const proj = L.defaultProject();
 ok(proj.version === 2 && proj.layers.length === 2, 'default project has 2 layers', proj.layers.length);

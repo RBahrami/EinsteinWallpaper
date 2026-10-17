@@ -157,7 +157,12 @@ A missing `gradient` falls back to a dark blue linear default. A legacy
   "effects": {
     "blur": 0, "glow": 0, "glowRadius": 14,
     "shadow": 0, "shadowSoft": 14, "shadowOff": 8,
-    "grain": 0, "vignette": 0, "vignetteMode": "dark"
+    "grain": 0, "vignette": 0, "vignetteMode": "dark",
+    "shimmer": 0, "shimmerAngle": 30, "shimmerPhase": 0, "shimmerScale": 100,
+    "sheen": 0, "sheenAngle": 30, "sheenPos": 50,
+    "irid": 0, "iridScale": 100, "iridAngle": 0,
+    "aberration": 0,
+    "scan": 0, "scanGap": 4
   }
 }
 ```
@@ -259,6 +264,25 @@ All visible layers animate together on a shared timeline; animated exports
 All fields optional; `0` = off. `blur`, `glowRadius`, `shadowSoft`,
 `shadowOff` are **pixels**; `glow`, `shadow`, `grain`, `vignette` are
 **0–100 percent**; `vignetteMode` is `dark` | `light`.
+
+Special effects (static light passes — they render identically in the live
+preview, PNG and every animated export):
+
+| Field | Range | Default | What it does |
+|---|---|---|---|
+| `shimmer` | 0–100 (%) | 0 | static version of the Shimmer (light wave) animation: soft repeating light/dark bands across the layer |
+| `shimmerAngle` | 0–345 step 15 | 30 | wave travel direction |
+| `shimmerPhase` | 0–100 | 0 | shifts the wave along its direction |
+| `shimmerScale` | 20–400 (%) | 100 | wavelength multiplier (100 ≈ one wave per ⅓ of the canvas diagonal) |
+| `sheen` | 0–100 (%) | 0 | ONE soft band of light across the layer (frozen light sweep) |
+| `sheenAngle` | 0–345 step 15 | 30 | sweep axis |
+| `sheenPos` | 0–100 | 50 | band position across the layer |
+| `irid` | 0–100 (%) | 0 | iridescent rainbow sheen (holographic tint) |
+| `iridAngle` | 0–345 step 15 | 0 | rainbow axis |
+| `iridScale` | 20–400 (%) | 100 | rainbow cycle density |
+| `aberration` | 0–20 (px) | 0 | chromatic aberration — red/blue channel split along a fixed 20° axis |
+| `scan` | 0–100 (%) | 0 | CRT scanlines strength |
+| `scanGap` | 2–24 (px) | 4 | distance between scanlines |
 
 ---
 

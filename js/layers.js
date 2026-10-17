@@ -47,6 +47,23 @@
     blur: 0, glow: 0, glowRadius: 14,
     shadow: 0, shadowSoft: 14, shadowOff: 8,
     grain: 0, vignette: 0, vignetteMode: 'dark',
+    // special effects (static light passes, see js/effects.js)
+    shimmer: 0, shimmerAngle: 30, shimmerPhase: 0, shimmerScale: 100,
+    sheen: 0, sheenAngle: 30, sheenPos: 50,
+    irid: 0, iridScale: 100, iridAngle: 0,
+    aberration: 0,
+    scan: 0, scanGap: 4,
+  };
+  // [min, max] clamp for every numeric fx field (sliders may be narrower)
+  const FX_RANGES = {
+    blur: [0, 60], glow: [0, 200], glowRadius: [0, 120],
+    shadow: [0, 200], shadowSoft: [0, 120], shadowOff: [0, 80],
+    grain: [0, 200], vignette: [0, 200],
+    shimmer: [0, 200], shimmerAngle: [0, 345], shimmerPhase: [0, 100], shimmerScale: [20, 400],
+    sheen: [0, 200], sheenAngle: [0, 345], sheenPos: [0, 100],
+    irid: [0, 200], iridScale: [20, 400], iridAngle: [0, 345],
+    aberration: [0, 20],
+    scan: [0, 200], scanGap: [2, 24],
   };
   const THEME_MODES = ['single', 'palette', 'gradient', 'duotone'];
   const ANIMS = ['none', 'shimmer', 'flow', 'glowwave'];
@@ -99,10 +116,10 @@
   function sanitizeFx(fx) {
     const out = Object.assign({}, FX_DEFAULTS);
     if (fx && typeof fx === 'object') {
-      for (const k of ['blur', 'glow', 'glowRadius', 'shadow', 'shadowSoft', 'shadowOff', 'grain', 'vignette']) {
+      for (const k of Object.keys(FX_RANGES)) {
         if (fx[k] != null) {
-          const hi = k === 'blur' ? 60 : k === 'glowRadius' ? 120 : k === 'shadowSoft' ? 120 : k === 'shadowOff' ? 80 : 200;
-          out[k] = clampNum(fx[k], 0, hi, FX_DEFAULTS[k]);
+          const [lo, hi] = FX_RANGES[k];
+          out[k] = clampNum(fx[k], lo, hi, FX_DEFAULTS[k]);
         }
       }
       if (fx.vignetteMode === 'light' || fx.vignetteMode === 'dark') out.vignetteMode = fx.vignetteMode;

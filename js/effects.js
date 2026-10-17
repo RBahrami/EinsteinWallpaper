@@ -9,8 +9,12 @@
  *      drop shadow (ctx.shadow*) — the scene canvas has a transparent
  *      background so shadows follow tile silhouettes
  *   3. glow pass: re-composite the scene additively, blurred by glowRadius
- *   4. grain: pre-generated noise tile, 'overlay' composite
- *   5. vignette: cached radial gradient, darken or lighten
+ *   4. animation overlay (Gradient Flow / Glow Wave)
+ *   5. SPECIAL EFFECTS (static light passes, see specialPasses below):
+ *      frozen Shimmer light wave, Sheen light sweep, Iridescence rainbow
+ *      sheen, Chromatic aberration (RGB channel split), CRT Scanlines
+ *   6. grain: pre-generated noise tile, 'overlay' composite
+ *   7. vignette: cached radial gradient, darken or lighten
  *
  * All offscreen buffers are pooled and only resized when dimensions change.
  * Effect settings (0 = disabled/neutral):
@@ -20,6 +24,21 @@
  *                                             position maps linearly to
  *                                             effect strength
  *   vignetteMode                            — 'dark' | 'light'
+ * Special effects (all optional, 0 = off):
+ *   shimmer      — 0–100 %, frozen version of the Shimmer (light wave)
+ *                  animation: soft repeating light bands at shimmerAngle
+ *   shimmerAngle — 0–345°, wave travel direction
+ *   shimmerPhase — 0–100, shifts the wave along its direction
+ *   shimmerScale — 20–400 %, wavelength multiplier (100 = diagonal/3)
+ *   sheen        — 0–100 %, ONE soft band of light across the layer
+ *   sheenAngle   — 0–345°, sweep axis
+ *   sheenPos     — 0–100, band position across the layer
+ *   irid         — 0–100 %, iridescent rainbow sheen
+ *   iridScale    — 20–400 %, rainbow cycle density
+ *   iridAngle    — 0–345°, rainbow axis
+ *   aberration   — 0–20 px, chromatic aberration (R/B channel split)
+ *   scan         — 0–100 %, CRT scanlines strength
+ *   scanGap      — 2–24 px, distance between scanlines
  */
 (function (root) {
   'use strict';
@@ -60,6 +79,188 @@
     }
     ctx.fillStyle = look.bg || '#000';
     ctx.fillRect(0, 0, W, H);
+  }
+
+  /* ---------------- special effects (static light passes) ---------------- */
+  const D2R = Math.PI / 180;
+
+  // Fill the pooled buffer T with fn(T.ctx) (a gradient fill), clip the
+  // result to the target's own alpha (so transparent regions stay
+  // transparent in the multi-layer path) and blend it onto the target.
+  function maskedPass(targetCtx, T, W, H, paint, blend, alpha) {
+    const tg = T.ctx;
+    tg.save();
+    paint(tg);
+    tg.globalCompositeOperation = 'destination-in';
+    tg.drawImage(targetCtx.canvas, 0, 0, W, H);
+    tg.restore();
+    targetCtx.save();
+    targetCtx.globalCompositeOperation = blend;
+    targetCtx.globalAlpha = alpha;
+    targetCtx.drawImage(T.canvas, 0, 0, W, H);
+    targetCtx.restore();
+  }
+
+  // linear gradient along (dx,dy) through the canvas center, covering the
+  // whole canvas plus `pad` on both sides (so phase shifts never show ends)
+  function axisGradient(ctx, W, H, dx, dy, pad, stops) {
+    const half = (Math.abs(W * dx) + Math.abs(H * dy)) / 2;
+    const axis = half + pad;
+    const g = ctx.createLinearGradient(
+      W / 2 - dx * axis, H / 2 - dy * axis,
+      W / 2 + dx * axis, H / 2 + dy * axis);
+    for (const [t, c] of stops) g.addColorStop(Math.max(0, Math.min(1, t)), c);
+    return g;
+  }
+
+  // repeating soft light/dark bands — the static Shimmer (light wave)
+  function shimmerPass(targetCtx, W, H, fx, atop) {
+    const amt = Math.min(1, (+fx.shimmer || 0) / 100);
+    if (amt <= 0) return;
+    const th = (+fx.shimmerAngle || 0) * D2R;
+    const dx = Math.cos(th), dy = Math.sin(th);
+    const wl = Math.max(40, (Math.hypot(W, H) / 3) * ((+fx.shimmerScale || 100) / 100));
+    const phase = (Math.max(0, Math.min(100, +fx.shimmerPhase || 0)) / 100) * wl;
+    const half = (Math.abs(W * dx) + Math.abs(H * dy)) / 2;
+    const axis = half + wl;
+    const L = 2 * axis;
+    const stops = [];
+    const segs = Math.ceil(L / wl) + 1;
+    for (let k = 0; k <= segs; k++) {
+      const s = (k * wl - phase) / L; // one wave period per segment
+      // trough (dark) -> calm -> crest (light) -> calm, sine-ish shading
+      stops.push([s, 'rgba(0,0,0,0.42)']);
+      stops.push([s + 0.25 * wl / L, 'rgba(0,0,0,0)']);
+      stops.push([s + 0.5 * wl / L, 'rgba(255,252,240,0.55)']);
+      stops.push([s + 0.75 * wl / L, 'rgba(0,0,0,0)']);
+    }
+    const T = buffer('fxWave', W, H);
+    maskedPass(targetCtx, T, W, H, (tg) => {
+      tg.fillStyle = axisGradient(tg, W, H, dx, dy, wl, stops);
+      tg.fillRect(0, 0, W, H);
+    }, atop ? 'source-atop' : 'soft-light', amt);
+  }
+
+  // ONE soft band of light — a frozen light sweep
+  function sheenPass(targetCtx, W, H, fx, atop) {
+    const amt = Math.min(1, (+fx.sheen || 0) / 100);
+    if (amt <= 0) return;
+    const th = (+fx.sheenAngle || 0) * D2R;
+    const dx = Math.cos(th), dy = Math.sin(th);
+    const half = (Math.abs(W * dx) + Math.abs(H * dy)) / 2;
+    const bw = Math.hypot(W, H) * 0.24; // band half-width
+    const pos = (Math.max(0, Math.min(100, +fx.sheenPos || 50)) / 100) * 2 * half; // -half..+half
+    const off = pos - half;
+    const T = buffer('fxWave', W, H);
+    maskedPass(targetCtx, T, W, H, (tg) => {
+      const g = tg.createLinearGradient(
+        W / 2 + dx * (off - bw), H / 2 + dy * (off - bw),
+        W / 2 + dx * (off + bw), H / 2 + dy * (off + bw));
+      g.addColorStop(0, 'rgba(255,251,238,0)');
+      g.addColorStop(0.5, 'rgba(255,251,238,0.85)');
+      g.addColorStop(1, 'rgba(255,251,238,0)');
+      tg.fillStyle = g;
+      tg.fillRect(0, 0, W, H);
+    }, atop ? 'source-atop' : 'soft-light', amt);
+  }
+
+  // iridescent rainbow sheen (oil-slick / holographic tint)
+  function iridPass(targetCtx, W, H, fx, atop) {
+    const amt = Math.min(1, (+fx.irid || 0) / 100);
+    if (amt <= 0) return;
+    const th = (+fx.iridAngle || 0) * D2R;
+    const dx = Math.cos(th), dy = Math.sin(th);
+    const scale = Math.max(0.2, (+fx.iridScale || 100) / 100);
+    const cycles = Math.max(1, Math.round(2.5 * scale)); // rainbow cycles over the axis
+    const stops = [];
+    for (let k = 0; k <= cycles; k++) {
+      stops.push([k / cycles, `hsl(${Math.round(k / cycles * 360)}, 95%, 55%)`]);
+    }
+    const T = buffer('fxWave', W, H);
+    maskedPass(targetCtx, T, W, H, (tg) => {
+      tg.fillStyle = axisGradient(tg, W, H, dx, dy, 10, stops);
+      tg.fillRect(0, 0, W, H);
+    }, atop ? 'source-atop' : 'soft-light', amt * 0.9);
+  }
+
+  // chromatic aberration: split R/B channels and offset them along a fixed
+  // axis (20°); G stays put. Works identically on opaque and transparent
+  // targets because each channel copy is re-clipped to the snapshot alpha.
+  const ABERR_AXIS = 20 * D2R;
+  function aberrationPass(targetCtx, W, H, fx) {
+    const d = Math.min(20, Math.max(0, +fx.aberration || 0));
+    if (d <= 0) return;
+    const ox = Math.cos(ABERR_AXIS) * d, oy = Math.sin(ABERR_AXIS) * d;
+    const S = buffer('fxSnap', W, H);
+    S.ctx.drawImage(targetCtx.canvas, 0, 0, W, H);
+    const C = buffer('fxCh', W, H);
+    targetCtx.save();
+    targetCtx.clearRect(0, 0, W, H);
+    targetCtx.restore();
+    const channels = [
+      ['#00ff00', 0, 0],
+      ['#ff0000', ox, oy],
+      ['#0000ff', -ox, -oy],
+    ];
+    for (const [col, cx, cy] of channels) {
+      C.ctx.save();
+      C.ctx.drawImage(S.canvas, 0, 0, W, H);
+      C.ctx.globalCompositeOperation = 'multiply';
+      C.ctx.fillStyle = col;
+      C.ctx.fillRect(0, 0, W, H);
+      C.ctx.globalCompositeOperation = 'destination-in';
+      C.ctx.drawImage(S.canvas, 0, 0, W, H);
+      C.ctx.restore();
+      targetCtx.save();
+      targetCtx.globalCompositeOperation = 'lighter';
+      targetCtx.drawImage(C.canvas, cx, cy, W, H);
+      targetCtx.restore();
+    }
+    // 'lighter' unions the three channel alphas (α_out = 1-(1-α)^3), which
+    // would boost translucent layers and spill past the silhouette — clip
+    // the recombination back to the snapshot's exact alpha.
+    targetCtx.save();
+    targetCtx.globalCompositeOperation = 'destination-in';
+    targetCtx.drawImage(S.canvas, 0, 0, W, H);
+    targetCtx.restore();
+  }
+
+  // CRT scanlines: cached 1×period pattern of dark lines
+  const scanPatterns = new Map();
+  function getScanPattern(period) {
+    let c = scanPatterns.get(period);
+    if (!c) {
+      c = document.createElement('canvas');
+      c.width = 1; c.height = period;
+      const g = c.getContext('2d');
+      const band = Math.max(1, Math.round(period * 0.45));
+      g.fillStyle = 'rgba(8,10,14,1)';
+      g.fillRect(0, 0, 1, band);
+      scanPatterns.set(period, c);
+    }
+    return c;
+  }
+  function scanPass(targetCtx, W, H, fx, atop) {
+    const amt = Math.min(1, (+fx.scan || 0) / 100);
+    if (amt <= 0) return;
+    const gap = Math.max(2, Math.round(+fx.scanGap || 4));
+    // density relative to canvas height (~240 lines) so every resolution
+    // shows the same texture; slider adds a multiplier
+    const period = Math.max(gap, Math.round(Math.max(2, H / 240) * gap));
+    targetCtx.save();
+    targetCtx.globalCompositeOperation = atop ? 'source-atop' : 'multiply';
+    targetCtx.globalAlpha = amt * 0.75;
+    targetCtx.fillStyle = targetCtx.createPattern(getScanPattern(period), 'repeat');
+    targetCtx.fillRect(0, 0, W, H);
+    targetCtx.restore();
+  }
+
+  function specialPasses(targetCtx, W, H, fx, atop) {
+    shimmerPass(targetCtx, W, H, fx, atop);
+    sheenPass(targetCtx, W, H, fx, atop);
+    iridPass(targetCtx, W, H, fx, atop);
+    aberrationPass(targetCtx, W, H, fx);
+    scanPass(targetCtx, W, H, fx, atop);
   }
 
   /* ---------------- main compose ---------------- */
@@ -112,8 +313,11 @@
       targetCtx.restore();
     }
 
-    // animation overlay (between scene and grain/vignette)
+    // animation overlay (between scene and special effects/grain/vignette)
     if (overlayFn) overlayFn(targetCtx);
+
+    // special effects (static light passes)
+    specialPasses(targetCtx, W, H, fx, atopGrainVignette);
 
     // grain ('source-atop' on transparent layer targets: tint own pixels only)
     if (grain > 0) {
