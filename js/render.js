@@ -504,6 +504,52 @@
     return out;
   }
 
+  /*
+   * Frozen per-tile shimmer — the SPECIAL-EFFECT still frame of the animated
+   * shimmer in makeAnimator (same cell-based model, not a raster overlay):
+   * a quantized sine wave sampled at each tile center picks one of
+   * SHIM_STEPS shade variants of that tile's own LUT color, so the pattern
+   * reads as shade variants of every color, exactly like a paused frame of
+   * the animation.
+   *
+   *   strength  — scales the shade amplitude around the animation's ±0.25:
+   *               strength 50 = the animation look, 0 = flat, 100 = ±0.5
+   *   angle     — travel direction of the wave (animation uses a fixed
+   *               diagonal; here user-steerable)
+   *   scale     — wavelength multiplier around the animation's wave number
+   *               |(0.9,1.4)| = 1.6644 rad/px (100% = the animation's rhythm)
+   *   phase     — where the frozen wave sits (0..100, hidden control;
+   *               dice-randomized), maps to the animation's 2·phase offset
+   *
+   * Returns a paintTiles colorOverride (tile, i) -> css color, or null when
+   * the effect is off. The layer's shimmer ANIMATION, when active, repaints
+   * every tile per frame and therefore always wins over this static base —
+   * the animation itself is never paused or altered.
+   */
+  function frozenShimmer(scene, look, fx) {
+    const amt = Math.min(1, (+fx.shimmer || 0) / 100);
+    if (!(amt > 0)) return null;
+    const a = +fx.shimmerAngle;
+    const th = rad(Number.isFinite(a) ? a : 30);
+    const dx = Math.cos(th), dy = Math.sin(th);
+    const sc = Math.max(20, Math.min(400, +fx.shimmerScale || 100)) / 100;
+    const k = 1.6644 / sc; // wave number in rad/scene-px
+    const phase = 2 * Math.PI * (Math.max(0, Math.min(100, +fx.shimmerPhase || 0)) / 100);
+    const amp = 0.5 * amt; // strength 50 -> ±0.25 like the animation
+    const luts = [];
+    for (let s = 0; s < SHIM_STEPS; s++) {
+      const f = 1 + amp * (s - (SHIM_STEPS - 1) / 2) / ((SHIM_STEPS - 1) / 2);
+      luts.push(look.lut.map((c) => PAL.shade(c, f)));
+    }
+    const lutIdx = scene.lutIdx;
+    return (tile, i) => {
+      const [px, py] = tilePos(tile);
+      const w = Math.sin(phase - (px * dx + py * dy) * k);
+      const sIdx = Math.max(0, Math.min(SHIM_STEPS - 1, Math.round((w + 1) / 2 * (SHIM_STEPS - 1))));
+      return luts[sIdx][lutIdx[i]];
+    };
+  }
+
   /* ------------------------------------------------------- drawing */
 
   // paint tiles only (transparent background) onto ctx
@@ -626,10 +672,11 @@
     ctx.globalAlpha = 1;
   }
 
-  // full scene paint onto a target ctx (used by Effects pipeline)
-  function paintScene(targetCtx, scene, params, look) {
+  // full scene paint onto a target ctx (used by Effects pipeline).
+  // colorOverride: optional per-tile fill replacement (frozen shimmer).
+  function paintScene(targetCtx, scene, params, look, colorOverride) {
     targetCtx.clearRect(0, 0, scene.W, scene.H);
-    paintTiles(targetCtx, scene, look);
+    paintTiles(targetCtx, scene, look, colorOverride);
   }
 
   /* ----------------------------------------------------- animation */
@@ -740,7 +787,7 @@
 
   root.Renderer = {
     buildScene, colorize, buildLut, buildLutFromColors, buildSolidLut, buildShimLuts,
-    paintTiles, paintScene, makeAnimator,
+    paintTiles, paintScene, makeAnimator, frozenShimmer,
     rng, hash2, shrunkHatOutline, shrunkPoly, clusterBBox,
   };
 })(typeof window !== 'undefined' ? window : globalThis);

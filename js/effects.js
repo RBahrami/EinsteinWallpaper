@@ -10,11 +10,13 @@
  *      background so shadows follow tile silhouettes
  *   3. glow pass: re-composite the scene additively, blurred by glowRadius
  *   4. animation overlay (Gradient Flow / Glow Wave)
- *   5. SPECIAL EFFECTS (static light passes, see specialPasses below):
- *      ONE active special effect per layer (fx.special), picked in the UI
- *      from a dropdown: frozen Shimmer light wave, Sheen light sweep,
- *      Iridescence rainbow sheen, Chromatic aberration (RGB channel split),
- *      CRT Scanlines
+ *   5. SPECIAL EFFECTS (see specialPasses below): ONE active special
+ *      effect per layer (fx.special), picked in the UI from a dropdown:
+ *      Sheen light sweep, Iridescence rainbow sheen, Chromatic aberration
+ *      (RGB channel split), CRT Scanlines. The frozen Shimmer is NOT a
+ *      raster pass — it shades tiles per-cell in the render path
+ *      (Renderer.frozenShimmer, a still frame of the shimmer animation),
+ *      so it arrives here already applied in the scene canvas.
  *   6. grain: pre-generated noise tile, 'overlay' composite
  *   7. vignette: cached radial gradient, darken or lighten
  *
@@ -32,15 +34,17 @@
  * mode's are used. Legacy blobs without `special` are inferred from the
  * first non-zero amount.
  *   special      — active special-effect mode (see above)
- *   shimmer      — 0–100 %, frozen version of the Shimmer (light wave)
- *                  animation: repeating light/dark bands at shimmerAngle;
- *                  drawn twice — crests with 'screen' (lifts dark
- *                  backgrounds), troughs with 'multiply' (reaches light
- *                  ones) so it reads on ANY background
+ *   shimmer      — 0–100 %, FROZEN version of the Shimmer animation:
+ *                  cell-based per-tile shade variants (a quantized wave
+ *                  over tile centers picks one of 9 shades of each tile's
+ *                  own color), rendered in the scene paint via
+ *                  Renderer.frozenShimmer — strength 50 matches the
+ *                  animation's ±0.25 shade amplitude. Not a raster pass.
  *   shimmerAngle — 0–345°, wave travel direction
- *   shimmerPhase — 0–100, shifts the wave along its direction (kept in the
+ *   shimmerPhase — 0–100, where the frozen wave sits (kept in the
  *                  data model; not exposed in the simplified UI)
- *   shimmerScale — 20–400 %, wavelength multiplier (100 = diagonal/3)
+ *   shimmerScale — 20–400 %, wavelength multiplier (100 = the
+ *                  animation's rhythm, |(0.9,1.4)| rad/px)
  *   sheen        — 0–100 %, ONE soft band of light across the layer
  *   sheenAngle   — 0–345°, sweep axis
  *   sheenPos     — 0–100, band position across the layer
@@ -122,45 +126,6 @@
       W / 2 + dx * axis, H / 2 + dy * axis);
     for (const [t, c] of stops) g.addColorStop(Math.max(0, Math.min(1, t)), c);
     return g;
-  }
-
-  // repeating light/dark bands — the static Shimmer (light wave).
-  // soft-light is a mathematical no-op on pure black/white and far too
-  // timid on dark themes, so the wave buffer is drawn TWICE: the light
-  // crests with 'screen' (visibly lift dark backgrounds) and the dark
-  // troughs with 'multiply' (visible on light ones). On transparent layer
-  // targets both draws become 'source-atop' so the layer's own alpha is
-  // never boosted and nothing spills past its silhouette.
-  function shimmerPass(targetCtx, W, H, fx, atop) {
-    const amt = Math.min(1, (+fx.shimmer || 0) / 100);
-    if (amt <= 0) return;
-    const th = (+fx.shimmerAngle || 0) * D2R;
-    const dx = Math.cos(th), dy = Math.sin(th);
-    const wl = Math.max(40, (Math.hypot(W, H) / 3) * ((+fx.shimmerScale || 100) / 100));
-    const phase = (Math.max(0, Math.min(100, +fx.shimmerPhase || 0)) / 100) * wl;
-    const half = (Math.abs(W * dx) + Math.abs(H * dy)) / 2;
-    const axis = half + wl;
-    const L = 2 * axis;
-    const stops = [];
-    const segs = Math.ceil(L / wl) + 1;
-    for (let k = 0; k <= segs; k++) {
-      const s = (k * wl - phase) / L; // one wave period per segment
-      // crest (light) -> calm -> trough (dark) -> calm, sine-ish shading
-      stops.push([s, 'rgba(255,252,240,1)']);
-      stops.push([s + 0.25 * wl / L, 'rgba(0,0,0,0)']);
-      stops.push([s + 0.5 * wl / L, 'rgba(0,0,0,1)']);
-      stops.push([s + 0.75 * wl / L, 'rgba(0,0,0,0)']);
-    }
-    const T = buffer('fxWave', W, H);
-    const paint = (tg) => {
-      tg.fillStyle = axisGradient(tg, W, H, dx, dy, wl, stops);
-      tg.fillRect(0, 0, W, H);
-    };
-    // 'screen' with black pixels is a no-op and 'multiply' with white ones
-    // is a no-op, so ONE buffer serves both draws: each pass shows only its
-    // own half of the wave.
-    maskedPass(targetCtx, T, W, H, paint, atop ? 'source-atop' : 'screen', amt * 0.5);
-    maskedPass(targetCtx, T, W, H, paint, atop ? 'source-atop' : 'multiply', amt * 0.4);
   }
 
   // ONE soft band of light — a frozen light sweep. 'screen' (not
@@ -292,7 +257,8 @@
 
   function specialPasses(targetCtx, W, H, fx, atop) {
     switch (specialMode(fx)) {
-      case 'shimmer': shimmerPass(targetCtx, W, H, fx, atop); break;
+      // 'shimmer' is handled in the RENDER path (Renderer.frozenShimmer
+      // shades tiles per-cell in the scene paint) — no raster pass here
       case 'sheen': sheenPass(targetCtx, W, H, fx, atop); break;
       case 'irid': iridPass(targetCtx, W, H, fx, atop); break;
       case 'aberration': aberrationPass(targetCtx, W, H, fx); break;

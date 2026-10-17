@@ -125,10 +125,12 @@ all work with every tiling family.
 **Special effects** — one effect per layer, picked from a dropdown (None,
 Shimmer, Sheen, Iridescence, Chromatic aberration, Scanlines); only the
 selected effect's settings are shown. Same export guarantees:
-- **Shimmer (light wave)** — the Shimmer animation frozen in place:
-  repeating light/dark bands (strength + direction + wavelength). Drawn with
-  screen/multiply blends so it reads clearly on dark, light and mid
-  backgrounds alike,
+- **Shimmer (frozen tile shades)** — the Shimmer animation frozen in place,
+  using the very same cell-based model: a quantized wave over the tile
+  centers picks one of nine shade variants of each tile's own color
+  (strength + direction + wavelength; strength 50 matches the animation's
+  amplitude). Rendered in the scene paint, so it reads clearly on dark,
+  light and mid backgrounds alike,
 - **Sheen (light sweep)** — one soft band of light across the layer
   (strength + direction + position),
 - **Iridescence** — a holographic rainbow sheen (strength + spread +

@@ -887,7 +887,10 @@
     e.look = makeLayerLook(layer);
     e.animator = R.makeAnimator(e.scene, p, e.look);
     e.ckey = ckeyFor(layer);
-    R.paintScene(e.ctx, e.scene, p, e.look);
+    // frozen special-effect shimmer shades tiles IN the base paint (a still
+    // frame of the shimmer animation, cell-based like the animator); the
+    // shimmer animation itself repaints per frame and is never paused
+    R.paintScene(e.ctx, e.scene, p, e.look, R.frozenShimmer(e.scene, e.look, layer.effects));
   }
 
   function anyAnimating() {
@@ -1072,8 +1075,9 @@
       c.width = W; c.height = H;
       const sctx = c.getContext('2d');
       // paint the static scene ONCE: per-tile animations repaint it per
-      // frame, overlay/static renders composite this painted base
-      R.paintScene(sctx, sc, p, lk);
+      // frame, overlay/static renders composite this painted base.
+      // Frozen special-effect shimmer shades the tiles in this base paint.
+      R.paintScene(sctx, sc, p, lk, R.frozenShimmer(sc, lk, layer.effects));
       const animator = R.makeAnimator(sc, p, lk);
       const fxC = document.createElement('canvas');
       fxC.width = W; fxC.height = H;
@@ -2280,13 +2284,16 @@
     };
 
     // ---- effects (selected layer) ----
-    const fxBind = (id, key, valId, fmt) => {
+    // repaint=true: the effect shades tiles in the SCENE paint (frozen
+    // shimmer), so the layer canvas must be repainted, not just recomposed
+    const fxBind = (id, key, valId, fmt, repaint) => {
       $(id).oninput = (e) => {
         const l = SP();
         l.effects[key] = +e.target.value;
         $(valId).textContent = fmt(+e.target.value);
+        if (repaint) recolor(l);
         // post-processing only: recompose reusing the painted scene canvases
-        composeFrame(performance.now(), true);
+        else composeFrame(performance.now(), true);
         save('fx' + key[0].toUpperCase() + key.slice(1));
       };
     };
@@ -2299,9 +2306,9 @@
     fxBind('fxGrain', 'grain', 'fxGrainVal', (v) => Math.round(v) + '%');
     fxBind('fxVignette', 'vignette', 'fxVignetteVal', (v) => Math.round(v) + '%');
     $('fxVignetteMode').onchange = (e) => { SP().effects.vignetteMode = e.target.value; composeFrame(performance.now(), true); save('fxVignetteMode'); };
-    fxBind('fxShimmer', 'shimmer', 'fxShimmerVal', (v) => Math.round(v) + '%');
-    fxBind('fxShimmerAngle', 'shimmerAngle', 'fxShimmerAngleVal', (v) => v + '°');
-    fxBind('fxShimmerScale', 'shimmerScale', 'fxShimmerScaleVal', (v) => Math.round(v) + '%');
+    fxBind('fxShimmer', 'shimmer', 'fxShimmerVal', (v) => Math.round(v) + '%', true);
+    fxBind('fxShimmerAngle', 'shimmerAngle', 'fxShimmerAngleVal', (v) => v + '°', true);
+    fxBind('fxShimmerScale', 'shimmerScale', 'fxShimmerScaleVal', (v) => Math.round(v) + '%', true);
     fxBind('fxSheen', 'sheen', 'fxSheenVal', (v) => Math.round(v) + '%');
     fxBind('fxSheenAngle', 'sheenAngle', 'fxSheenAngleVal', (v) => v + '°');
     fxBind('fxSheenPos', 'sheenPos', 'fxSheenPosVal', (v) => Math.round(v) + '%');
@@ -2329,7 +2336,9 @@
       fx.shimmer = 0; fx.sheen = 0; fx.irid = 0; fx.aberration = 0; fx.scan = 0;
       Object.assign(fx, SPECIAL_SEED[fx.special] || {});
       syncControls();
-      composeFrame(performance.now(), true);
+      // shimmer renders in the scene paint (frozen per-tile shades) — repaint
+      // the layer canvas, not just the post-processing composite
+      recolor(SP());
       const opt = e.target.selectedOptions[0];
       save('fxSpecial', 'Special effect · ' + (opt ? opt.textContent : fx.special));
     };

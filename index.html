@@ -339,7 +339,7 @@
       </details>
 
       <details id="sec-fx">
-        <summary>Visual effects <span class="sumhint" id="hintFx"></span><span class="infotip" tabindex="0" role="button" aria-label="Visual effects help" aria-expanded="false"><span class="tipcontent" hidden>Effects apply to the selected layer only — in the live preview and in every export format alike. 0 = off.<br><br><b>Special effects</b> picks ONE effect from the dropdown (Shimmer light wave, Sheen, Iridescence, Chromatic aberration, Scanlines); only that effect's settings are shown, and switching to None turns it off.</span></span><button class="dice" id="randFx" title="Randomize this layer's effects">🎲</button></summary>
+        <summary>Visual effects <span class="sumhint" id="hintFx"></span><span class="infotip" tabindex="0" role="button" aria-label="Visual effects help" aria-expanded="false"><span class="tipcontent" hidden>Effects apply to the selected layer only — in the live preview and in every export format alike. 0 = off.<br><br><b>Special effects</b> picks ONE effect from the dropdown (Shimmer — frozen tile shades, Sheen, Iridescence, Chromatic aberration, Scanlines); only that effect's settings are shown, and switching to None turns it off. Shimmer is the still frame of the Shimmer animation: each tile gets a shade variant of its own color.</span></span><button class="dice" id="randFx" title="Randomize this layer's effects">🎲</button></summary>
         <div class="body">
           <div class="row">
             <label>Blur <output id="fxBlurVal"></output></label>
@@ -389,7 +389,7 @@
             <label for="fxSpecial">Effect</label>
             <select id="fxSpecial">
               <option value="none">None</option>
-              <option value="shimmer">Shimmer — light wave</option>
+              <option value="shimmer">Shimmer — frozen tile shades</option>
               <option value="sheen">Sheen — light sweep</option>
               <option value="irid">Iridescence</option>
               <option value="aberration">Chromatic aberration</option>

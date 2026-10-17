@@ -276,10 +276,10 @@ amounts and seeds a visible strength; strength `0` = off.
 | Field | Range | Default | What it does |
 |---|---|---|---|
 | `special` | `none` \| `shimmer` \| `sheen` \| `irid` \| `aberration` \| `scan` | `none` | the one active special effect |
-| `shimmer` | 0–100 (%) | 0 | static version of the Shimmer (light wave) animation: repeating light/dark bands; screen + multiply blends keep it visible on any background |
+| `shimmer` | 0–100 (%) | 0 | frozen frame of the Shimmer animation, cell-based like the animator: a quantized wave over tile centers picks one of 9 shade variants of each tile's own color (Renderer.frozenShimmer, painted in the scene canvas — not a raster pass); strength 50 = the animation's ±0.25 amplitude |
 | `shimmerAngle` | 0–345 step 15 | 30 | wave travel direction |
 | `shimmerPhase` | 0–100 | 0 | shifts the wave along its direction (data-model only — not shown in the simplified UI) |
-| `shimmerScale` | 20–400 (%) | 100 | wavelength multiplier (100 ≈ one wave per ⅓ of the canvas diagonal) |
+| `shimmerScale` | 20–400 (%) | 100 | wavelength multiplier (100 = the animation's rhythm, |(0.9,1.4)| rad/px) |
 | `sheen` | 0–100 (%) | 0 | ONE soft band of light across the layer (frozen light sweep) |
 | `sheenAngle` | 0–345 step 15 | 30 | sweep axis |
 | `sheenPos` | 0–100 | 50 | band position across the layer |
