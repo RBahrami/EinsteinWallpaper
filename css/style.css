@@ -211,6 +211,10 @@ label.check input { accent-color: var(--accent); }
   font-size: 10px; font-weight: 600; letter-spacing: .8px;
   text-transform: uppercase; color: var(--accent2);
 }
+/* per-mode special-effect rows: only the active mode's rows are shown —
+   the explicit rule beats .row.two's display:flex (author CSS overrides
+   the UA [hidden] default) */
+.row.sp-row[hidden] { display: none; }
 
 /* ---------------- stage ---------------- */
 #stage { flex: 1; display: flex; flex-direction: column; min-width: 0; }

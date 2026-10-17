@@ -122,12 +122,17 @@ film Grain, and Vignette (darken or lighten edges). All default to neutral/off,
 all are applied identically to the live preview and to every export format, and
 all work with every tiling family.
 
-**Special effects** (static light passes, same export guarantees):
-- **Shimmer (light wave)** — the Shimmer animation frozen in place: soft
-  repeating light/dark bands with direction, phase and scale controls,
+**Special effects** — one effect per layer, picked from a dropdown (None,
+Shimmer, Sheen, Iridescence, Chromatic aberration, Scanlines); only the
+selected effect's settings are shown. Same export guarantees:
+- **Shimmer (light wave)** — the Shimmer animation frozen in place:
+  repeating light/dark bands (strength + direction + wavelength). Drawn with
+  screen/multiply blends so it reads clearly on dark, light and mid
+  backgrounds alike,
 - **Sheen (light sweep)** — one soft band of light across the layer
-  (angle + position),
-- **Iridescence** — a holographic rainbow sheen (angle + spread),
+  (strength + direction + position),
+- **Iridescence** — a holographic rainbow sheen (strength + spread +
+  direction),
 - **Chromatic aberration** — red/blue channel split for a lens look,
 - **Scanlines** — CRT-style dark scanlines (strength + spacing).
 

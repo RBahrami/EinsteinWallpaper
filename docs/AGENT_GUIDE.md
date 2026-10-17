@@ -155,6 +155,7 @@ A missing `gradient` falls back to a dark blue linear default. A legacy
   "flowAngle": 30,
 
   "effects": {
+    "special": "none",
     "blur": 0, "glow": 0, "glowRadius": 14,
     "shadow": 0, "shadowSoft": 14, "shadowOff": 8,
     "grain": 0, "vignette": 0, "vignetteMode": "dark",
@@ -265,14 +266,19 @@ All fields optional; `0` = off. `blur`, `glowRadius`, `shadowSoft`,
 `shadowOff` are **pixels**; `glow`, `shadow`, `grain`, `vignette` are
 **0–100 percent**; `vignetteMode` is `dark` | `light`.
 
-Special effects (static light passes — they render identically in the live
-preview, PNG and every animated export):
+Special effects — exactly **ONE** effect runs per layer, selected by
+`special` (the UI shows it as a dropdown and only exposes that effect's
+settings); they render identically in the live preview, PNG and every
+animated export. Legacy blobs without `special` infer the active mode from
+the first non-zero amount. Switching modes in the UI zeroes the other
+amounts and seeds a visible strength; strength `0` = off.
 
 | Field | Range | Default | What it does |
 |---|---|---|---|
-| `shimmer` | 0–100 (%) | 0 | static version of the Shimmer (light wave) animation: soft repeating light/dark bands across the layer |
+| `special` | `none` \| `shimmer` \| `sheen` \| `irid` \| `aberration` \| `scan` | `none` | the one active special effect |
+| `shimmer` | 0–100 (%) | 0 | static version of the Shimmer (light wave) animation: repeating light/dark bands; screen + multiply blends keep it visible on any background |
 | `shimmerAngle` | 0–345 step 15 | 30 | wave travel direction |
-| `shimmerPhase` | 0–100 | 0 | shifts the wave along its direction |
+| `shimmerPhase` | 0–100 | 0 | shifts the wave along its direction (data-model only — not shown in the simplified UI) |
 | `shimmerScale` | 20–400 (%) | 100 | wavelength multiplier (100 ≈ one wave per ⅓ of the canvas diagonal) |
 | `sheen` | 0–100 (%) | 0 | ONE soft band of light across the layer (frozen light sweep) |
 | `sheenAngle` | 0–345 step 15 | 30 | sweep axis |

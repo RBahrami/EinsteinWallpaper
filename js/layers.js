@@ -47,13 +47,16 @@
     blur: 0, glow: 0, glowRadius: 14,
     shadow: 0, shadowSoft: 14, shadowOff: 8,
     grain: 0, vignette: 0, vignetteMode: 'dark',
-    // special effects (static light passes, see js/effects.js)
+    // ONE active special effect per layer (dropdown in the UI)
+    special: 'none',
     shimmer: 0, shimmerAngle: 30, shimmerPhase: 0, shimmerScale: 100,
     sheen: 0, sheenAngle: 30, sheenPos: 50,
     irid: 0, iridScale: 100, iridAngle: 0,
     aberration: 0,
     scan: 0, scanGap: 4,
   };
+  // valid values for fx.special — exactly one special effect runs per layer
+  const SPECIAL_MODES = ['none', 'shimmer', 'sheen', 'irid', 'aberration', 'scan'];
   // [min, max] clamp for every numeric fx field (sliders may be narrower)
   const FX_RANGES = {
     blur: [0, 60], glow: [0, 200], glowRadius: [0, 120],
@@ -123,6 +126,16 @@
         }
       }
       if (fx.vignetteMode === 'light' || fx.vignetteMode === 'dark') out.vignetteMode = fx.vignetteMode;
+      if (SPECIAL_MODES.includes(fx.special)) out.special = fx.special;
+      else {
+        // legacy blob without `special`: infer the active mode from the
+        // first non-zero amount so old projects keep their special effect
+        if (out.shimmer > 0) out.special = 'shimmer';
+        else if (out.sheen > 0) out.special = 'sheen';
+        else if (out.irid > 0) out.special = 'irid';
+        else if (out.aberration > 0) out.special = 'aberration';
+        else if (out.scan > 0) out.special = 'scan';
+      }
     }
     return out;
   }
@@ -409,7 +422,7 @@
   }
 
   root.Layers = {
-    MAX_PATTERN_LAYERS, FX_DEFAULTS, THEME_MODES, ANIMS,
+    MAX_PATTERN_LAYERS, FX_DEFAULTS, SPECIAL_MODES, THEME_MODES, ANIMS,
     uid, clampInt, clampNum, hex, validPaletteRef, sanitizeFx, normGradient,
     DEFAULT_BG_GRADIENT, PROJECT_NAME_DEFAULT, projectName,
     createBackground, createPattern, defaultProject,

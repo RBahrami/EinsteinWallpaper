@@ -339,7 +339,7 @@
       </details>
 
       <details id="sec-fx">
-        <summary>Visual effects <span class="sumhint" id="hintFx"></span><span class="infotip" tabindex="0" role="button" aria-label="Visual effects help" aria-expanded="false"><span class="tipcontent" hidden>Effects apply to the selected layer only — in the live preview and in every export format alike. 0 = off.</span></span><button class="dice" id="randFx" title="Randomize this layer's effects">🎲</button></summary>
+        <summary>Visual effects <span class="sumhint" id="hintFx"></span><span class="infotip" tabindex="0" role="button" aria-label="Visual effects help" aria-expanded="false"><span class="tipcontent" hidden>Effects apply to the selected layer only — in the live preview and in every export format alike. 0 = off.<br><br><b>Special effects</b> picks ONE effect from the dropdown (Shimmer light wave, Sheen, Iridescence, Chromatic aberration, Scanlines); only that effect's settings are shown, and switching to None turns it off.</span></span><button class="dice" id="randFx" title="Randomize this layer's effects">🎲</button></summary>
         <div class="body">
           <div class="row">
             <label>Blur <output id="fxBlurVal"></output></label>
@@ -386,64 +386,71 @@
           </div>
           <div class="fxsep">Special effects</div>
           <div class="row">
-            <label>Shimmer (light wave) <output id="fxShimmerVal"></output></label>
+            <label for="fxSpecial">Effect</label>
+            <select id="fxSpecial">
+              <option value="none">None</option>
+              <option value="shimmer">Shimmer — light wave</option>
+              <option value="sheen">Sheen — light sweep</option>
+              <option value="irid">Iridescence</option>
+              <option value="aberration">Chromatic aberration</option>
+              <option value="scan">Scanlines — CRT</option>
+            </select>
+          </div>
+          <div class="row sp-row" data-sp="shimmer">
+            <label>Strength <output id="fxShimmerVal"></output></label>
             <input type="range" id="fxShimmer" min="0" max="100" step="1">
           </div>
-          <div class="row two">
+          <div class="row two sp-row" data-sp="shimmer">
             <div>
-              <label>Wave direction <output id="fxShimmerAngleVal"></output></label>
+              <label>Direction <output id="fxShimmerAngleVal"></output></label>
               <input type="range" id="fxShimmerAngle" min="0" max="345" step="15">
             </div>
             <div>
-              <label>Phase <output id="fxShimmerPhaseVal"></output></label>
-              <input type="range" id="fxShimmerPhase" min="0" max="100" step="1">
+              <label>Wavelength <output id="fxShimmerScaleVal"></output></label>
+              <input type="range" id="fxShimmerScale" min="20" max="300" step="5">
             </div>
           </div>
-          <div class="row">
-            <label>Wave scale <output id="fxShimmerScaleVal"></output></label>
-            <input type="range" id="fxShimmerScale" min="20" max="300" step="5">
+          <div class="row sp-row" data-sp="sheen">
+            <label>Strength <output id="fxSheenVal"></output></label>
+            <input type="range" id="fxSheen" min="0" max="100" step="1">
           </div>
-          <div class="row two">
+          <div class="row two sp-row" data-sp="sheen">
             <div>
-              <label>Sheen (light sweep) <output id="fxSheenVal"></output></label>
-              <input type="range" id="fxSheen" min="0" max="100" step="1">
-            </div>
-            <div>
-              <label>Sweep angle <output id="fxSheenAngleVal"></output></label>
+              <label>Direction <output id="fxSheenAngleVal"></output></label>
               <input type="range" id="fxSheenAngle" min="0" max="345" step="15">
             </div>
-          </div>
-          <div class="row">
-            <label>Sheen position <output id="fxSheenPosVal"></output></label>
-            <input type="range" id="fxSheenPos" min="0" max="100" step="1">
-          </div>
-          <div class="row two">
             <div>
-              <label>Iridescence <output id="fxIridVal"></output></label>
-              <input type="range" id="fxIrid" min="0" max="100" step="1">
+              <label>Position <output id="fxSheenPosVal"></output></label>
+              <input type="range" id="fxSheenPos" min="0" max="100" step="1">
+            </div>
+          </div>
+          <div class="row sp-row" data-sp="irid">
+            <label>Strength <output id="fxIridVal"></output></label>
+            <input type="range" id="fxIrid" min="0" max="100" step="1">
+          </div>
+          <div class="row two sp-row" data-sp="irid">
+            <div>
+              <label>Spread <output id="fxIridScaleVal"></output></label>
+              <input type="range" id="fxIridScale" min="20" max="300" step="5">
             </div>
             <div>
-              <label>Rainbow axis <output id="fxIridAngleVal"></output></label>
+              <label>Direction <output id="fxIridAngleVal"></output></label>
               <input type="range" id="fxIridAngle" min="0" max="345" step="15">
             </div>
           </div>
-          <div class="row">
-            <label>Rainbow spread <output id="fxIridScaleVal"></output></label>
-            <input type="range" id="fxIridScale" min="20" max="300" step="5">
+          <div class="row sp-row" data-sp="aberration">
+            <label>Amount <output id="fxAberrationVal"></output></label>
+            <input type="range" id="fxAberration" min="0" max="10" step="0.5">
           </div>
-          <div class="row two">
+          <div class="row two sp-row" data-sp="scan">
             <div>
-              <label>Chromatic aberration <output id="fxAberrationVal"></output></label>
-              <input type="range" id="fxAberration" min="0" max="10" step="0.5">
-            </div>
-            <div>
-              <label>Scanlines <output id="fxScanVal"></output></label>
+              <label>Strength <output id="fxScanVal"></output></label>
               <input type="range" id="fxScan" min="0" max="100" step="1">
             </div>
-          </div>
-          <div class="row">
-            <label>Scanline spacing <output id="fxScanGapVal"></output></label>
-            <input type="range" id="fxScanGap" min="2" max="12" step="1">
+            <div>
+              <label>Spacing <output id="fxScanGapVal"></output></label>
+              <input type="range" id="fxScanGap" min="2" max="12" step="1">
+            </div>
           </div>
         </div>
       </details>

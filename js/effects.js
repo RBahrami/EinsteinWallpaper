@@ -11,8 +11,10 @@
  *   3. glow pass: re-composite the scene additively, blurred by glowRadius
  *   4. animation overlay (Gradient Flow / Glow Wave)
  *   5. SPECIAL EFFECTS (static light passes, see specialPasses below):
- *      frozen Shimmer light wave, Sheen light sweep, Iridescence rainbow
- *      sheen, Chromatic aberration (RGB channel split), CRT Scanlines
+ *      ONE active special effect per layer (fx.special), picked in the UI
+ *      from a dropdown: frozen Shimmer light wave, Sheen light sweep,
+ *      Iridescence rainbow sheen, Chromatic aberration (RGB channel split),
+ *      CRT Scanlines
  *   6. grain: pre-generated noise tile, 'overlay' composite
  *   7. vignette: cached radial gradient, darken or lighten
  *
@@ -24,11 +26,20 @@
  *                                             position maps linearly to
  *                                             effect strength
  *   vignetteMode                            — 'dark' | 'light'
- * Special effects (all optional, 0 = off):
+ * Special effect model — exactly ONE special effect runs per layer, selected
+ * by fx.special ('none' | 'shimmer' | 'sheen' | 'irid' | 'aberration' |
+ * 'scan'); all special keys are still stored in fx and only the active
+ * mode's are used. Legacy blobs without `special` are inferred from the
+ * first non-zero amount.
+ *   special      — active special-effect mode (see above)
  *   shimmer      — 0–100 %, frozen version of the Shimmer (light wave)
- *                  animation: soft repeating light bands at shimmerAngle
+ *                  animation: repeating light/dark bands at shimmerAngle;
+ *                  drawn twice — crests with 'screen' (lifts dark
+ *                  backgrounds), troughs with 'multiply' (reaches light
+ *                  ones) so it reads on ANY background
  *   shimmerAngle — 0–345°, wave travel direction
- *   shimmerPhase — 0–100, shifts the wave along its direction
+ *   shimmerPhase — 0–100, shifts the wave along its direction (kept in the
+ *                  data model; not exposed in the simplified UI)
  *   shimmerScale — 20–400 %, wavelength multiplier (100 = diagonal/3)
  *   sheen        — 0–100 %, ONE soft band of light across the layer
  *   sheenAngle   — 0–345°, sweep axis
@@ -113,7 +124,13 @@
     return g;
   }
 
-  // repeating soft light/dark bands — the static Shimmer (light wave)
+  // repeating light/dark bands — the static Shimmer (light wave).
+  // soft-light is a mathematical no-op on pure black/white and far too
+  // timid on dark themes, so the wave buffer is drawn TWICE: the light
+  // crests with 'screen' (visibly lift dark backgrounds) and the dark
+  // troughs with 'multiply' (visible on light ones). On transparent layer
+  // targets both draws become 'source-atop' so the layer's own alpha is
+  // never boosted and nothing spills past its silhouette.
   function shimmerPass(targetCtx, W, H, fx, atop) {
     const amt = Math.min(1, (+fx.shimmer || 0) / 100);
     if (amt <= 0) return;
@@ -128,20 +145,26 @@
     const segs = Math.ceil(L / wl) + 1;
     for (let k = 0; k <= segs; k++) {
       const s = (k * wl - phase) / L; // one wave period per segment
-      // trough (dark) -> calm -> crest (light) -> calm, sine-ish shading
-      stops.push([s, 'rgba(0,0,0,0.42)']);
+      // crest (light) -> calm -> trough (dark) -> calm, sine-ish shading
+      stops.push([s, 'rgba(255,252,240,1)']);
       stops.push([s + 0.25 * wl / L, 'rgba(0,0,0,0)']);
-      stops.push([s + 0.5 * wl / L, 'rgba(255,252,240,0.55)']);
+      stops.push([s + 0.5 * wl / L, 'rgba(0,0,0,1)']);
       stops.push([s + 0.75 * wl / L, 'rgba(0,0,0,0)']);
     }
     const T = buffer('fxWave', W, H);
-    maskedPass(targetCtx, T, W, H, (tg) => {
+    const paint = (tg) => {
       tg.fillStyle = axisGradient(tg, W, H, dx, dy, wl, stops);
       tg.fillRect(0, 0, W, H);
-    }, atop ? 'source-atop' : 'soft-light', amt);
+    };
+    // 'screen' with black pixels is a no-op and 'multiply' with white ones
+    // is a no-op, so ONE buffer serves both draws: each pass shows only its
+    // own half of the wave.
+    maskedPass(targetCtx, T, W, H, paint, atop ? 'source-atop' : 'screen', amt * 0.5);
+    maskedPass(targetCtx, T, W, H, paint, atop ? 'source-atop' : 'multiply', amt * 0.4);
   }
 
-  // ONE soft band of light — a frozen light sweep
+  // ONE soft band of light — a frozen light sweep. 'screen' (not
+  // soft-light) so the band clearly lifts dark backgrounds too.
   function sheenPass(targetCtx, W, H, fx, atop) {
     const amt = Math.min(1, (+fx.sheen || 0) / 100);
     if (amt <= 0) return;
@@ -157,11 +180,11 @@
         W / 2 + dx * (off - bw), H / 2 + dy * (off - bw),
         W / 2 + dx * (off + bw), H / 2 + dy * (off + bw));
       g.addColorStop(0, 'rgba(255,251,238,0)');
-      g.addColorStop(0.5, 'rgba(255,251,238,0.85)');
+      g.addColorStop(0.5, 'rgba(255,251,238,0.9)');
       g.addColorStop(1, 'rgba(255,251,238,0)');
       tg.fillStyle = g;
       tg.fillRect(0, 0, W, H);
-    }, atop ? 'source-atop' : 'soft-light', amt);
+    }, atop ? 'source-atop' : 'screen', amt * 0.7);
   }
 
   // iridescent rainbow sheen (oil-slick / holographic tint)
@@ -255,12 +278,26 @@
     targetCtx.restore();
   }
 
+  // the ONE active special effect per layer; legacy blobs without the
+  // `special` field are inferred from their first non-zero amount
+  function specialMode(fx) {
+    if (fx.special) return fx.special;
+    if ((+fx.shimmer || 0) > 0) return 'shimmer';
+    if ((+fx.sheen || 0) > 0) return 'sheen';
+    if ((+fx.irid || 0) > 0) return 'irid';
+    if ((+fx.aberration || 0) > 0) return 'aberration';
+    if ((+fx.scan || 0) > 0) return 'scan';
+    return 'none';
+  }
+
   function specialPasses(targetCtx, W, H, fx, atop) {
-    shimmerPass(targetCtx, W, H, fx, atop);
-    sheenPass(targetCtx, W, H, fx, atop);
-    iridPass(targetCtx, W, H, fx, atop);
-    aberrationPass(targetCtx, W, H, fx);
-    scanPass(targetCtx, W, H, fx, atop);
+    switch (specialMode(fx)) {
+      case 'shimmer': shimmerPass(targetCtx, W, H, fx, atop); break;
+      case 'sheen': sheenPass(targetCtx, W, H, fx, atop); break;
+      case 'irid': iridPass(targetCtx, W, H, fx, atop); break;
+      case 'aberration': aberrationPass(targetCtx, W, H, fx); break;
+      case 'scan': scanPass(targetCtx, W, H, fx, atop); break;
+    }
   }
 
   /* ---------------- main compose ---------------- */
