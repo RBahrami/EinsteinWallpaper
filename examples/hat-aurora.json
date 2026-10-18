@@ -1,0 +1,29 @@
+{
+  "name": "Hat Aurora",
+  "aspect": "16:9",
+  "orientation": "landscape",
+  "resW": 1920,
+  "resH": 1080,
+  "layers": [
+    {
+      "type": "background",
+      "bg": { "source": "solid", "color": "#0b1020" }
+    },
+    {
+      "type": "pattern",
+      "name": "Aurora hats",
+      "family": "hat",
+      "variant": "H",
+      "tileSize": 44,
+      "rotation": 0,
+      "seed": 42,
+      "gap": 0.02,
+      "outlineWidth": 1.2,
+      "theme": {
+        "mode": "palette",
+        "colorMap": "supertile",
+        "paletteRef": { "kind": "builtin", "index": 3 }
+      }
+    }
+  ]
+}

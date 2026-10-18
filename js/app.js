@@ -1,5 +1,5 @@
 /*
- * app.js — UI wiring for EinsteinWallpaper (Geometric Wallpaper Studio).
+ * app.js — UI wiring for Tessellate (geometric wallpaper studio).
  *
  * Multi-layer model (js/layers.js): one permanent Background layer at the
  * bottom of the stack plus up to 8 Pattern layers. Only canvas dimensions,
@@ -1217,7 +1217,7 @@
   async function exportGIF() {
     if (gifBusy) return;
     gifBusy = true;
-    const btn = $('gifBtn');
+    const btn = popLabel($('gifBtn'));
     const orig = btn.textContent;
     try {
       const { bytes, frames, W, H, compressed } = await renderGifBytes((t) => { btn.textContent = t; });
@@ -1238,7 +1238,7 @@
   async function exportAPNG() {
     if (apngBusy) return;
     apngBusy = true;
-    const btn = $('apngBtn');
+    const btn = popLabel($('apngBtn'));
     const orig = btn.textContent;
     try {
       statusEl.textContent = 'rendering APNG frames…';
@@ -1269,6 +1269,10 @@
 
   /* --------------------------------------------- share (OS share sheet) */
 
+  // export menu items are two-line buttons (title + description); progress
+  // text replaces only the title line so the description survives the export
+  const popLabel = (btn) => btn.querySelector('.pilabel') || btn;
+
   // Hand the wallpaper to the operating system's share sheet: PNG while
   // nothing animates, seamless GIF otherwise. Devices/browsers without
   // Web Share file support (or plain file:// pages) fall back to a normal
@@ -1276,7 +1280,7 @@
   async function shareFiles(file, label) {
     if (navigator.canShare && navigator.canShare({ files: [file] })) {
       try {
-        await navigator.share({ files: [file], title: project.name || 'Wallpaper', text: 'Wallpaper made with Geometric Wallpaper Studio' });
+        await navigator.share({ files: [file], title: project.name || 'Wallpaper', text: 'Wallpaper made with Tessellate' });
         statusEl.textContent = 'shared ' + label;
         return;
       } catch (err) {
@@ -2465,9 +2469,9 @@
     dice('randBg', randomizeBg);
 
     $('layerRand').onclick = randomize;
-    $('pngBtn').onclick = exportPNG;
-    $('gifBtn').onclick = exportGIF;
-    $('apngBtn').onclick = exportAPNG;
+    $('pngBtn').onclick = () => { closePops(); exportPNG(); };
+    $('gifBtn').onclick = () => { closePops(); exportGIF(); };
+    $('apngBtn').onclick = () => { closePops(); exportAPNG(); };
     $('projSaveBtn').onclick = () => {
       downloadBlob(new Blob([JSON.stringify(buildProjectFile(), null, 2)],
         { type: 'application/json' }), `${fileBase()}-project.json`);
@@ -2500,26 +2504,34 @@
       closeModal();
     };
 
-    // ---- toolbar: new / random / share / canvas popover / about modal ----
+    // ---- toolbar: new / random / export menu / share / canvas popover / about modal ----
+    // canvas settings + export format menu share one open/close behavior
     $('newBgBtn').onclick = newBackgroundProject;
     $('randWallBtn').onclick = randomWallpaper;
     $('shareBtn').onclick = shareWallpaper;
-    const pop = $('canvasPop');
-    $('canvasBtn').onclick = (e) => {
-      e.stopPropagation();
-      pop.hidden = !pop.hidden;
-    };
-    pop.addEventListener('click', (e) => e.stopPropagation());
-    document.addEventListener('click', () => { if (!pop.hidden) pop.hidden = true; });
+    const pops = [['canvasBtn', 'canvasPop'], ['exportBtn', 'exportPop']];
+    const closePops = () => { for (const [, id] of pops) $(id).hidden = true; };
+    const anyPopOpen = () => pops.some(([, id]) => !$(id).hidden);
+    for (const [bId, pId] of pops) {
+      const p = $(pId);
+      $(bId).onclick = (e) => {
+        e.stopPropagation();
+        const wasOpen = !p.hidden;
+        closePops();
+        p.hidden = wasOpen; // toggle, and only one popover open at a time
+      };
+      p.addEventListener('click', (e) => e.stopPropagation());
+    }
+    document.addEventListener('click', closePops);
     const modal = $('modalWrap');
     const closeModal = () => { modal.hidden = true; };
     $('aboutBtn').onclick = () => { modal.hidden = false; };
     $('aboutClose').onclick = closeModal;
     modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && (!modal.hidden || !pop.hidden)) {
+      if (e.key === 'Escape' && (!modal.hidden || anyPopOpen())) {
         closeModal();
-        pop.hidden = true;
+        closePops();
       }
     });
 
@@ -2551,7 +2563,6 @@
     const sections = [
       ['sec-layers', 'Layers'], ['sec-tiling', 'Tiling'], ['sec-theme', 'Colors'],
       ['sec-bgprops', 'Background'], ['sec-fx', 'Effects'], ['sec-anim', 'Animation'],
-      ['sec-export', 'Export'],
     ];
     for (const [id, label] of sections) {
       const b = document.createElement('button');

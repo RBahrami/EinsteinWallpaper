@@ -1,11 +1,11 @@
-# Agent Guide — generating EinsteinWallpaper projects as JSON
+# Agent Guide — generating Tessellate (EinsteinWallpaper) projects as JSON
 
 This guide is for **AI agents and power users** who want to create wallpapers
 by writing a JSON file instead of clicking through the UI. Generate the JSON,
 give it to the user as a `.json` file, and they load it with **Load** in the
-top toolbar (project name, New background-only, Random one-layer
-wallpaper, undo/redo, canvas settings, save/load, share, fullscreen, about).
-The whole application state
+top toolbar (Tessellate logo + wordmark, project name, New background-only,
+Random one-layer wallpaper, undo/redo, canvas settings, save/load, export
+menu, share, fullscreen, about). The whole application state
 (layers, colors, effects, animation, canvas) lives in that one file.
 
 The app is fully offline and has no build step; the JSON is loaded and
@@ -402,6 +402,9 @@ flattens it onto black. PNG and APNG keep true RGBA transparency.
   `load failed: no project data found in file` in the status bar.
 
 ## 8. Output formats
+
+All three formats are offered by the toolbar **Export** menu (the button right
+after **Save**); picking a format starts the export immediately.
 
 | Format | Transparency | Animation | Notes |
 |---|---|---|---|

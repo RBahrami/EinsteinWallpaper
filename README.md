@@ -1,15 +1,21 @@
-# Einstein Wallpaper — Geometric Wallpaper Studio 🎩
+# Tessellate — Geometric Wallpaper Studio 🎩
 
-Generate wallpapers from the **Einstein tile** (the aperiodic "hat" monotile discovered
-in 2023 by David Smith, Joseph Samuel Myers, C. S. Kaplan and Chaim Goodman-Strauss) —
-**plus 13 more mathematically verified tiling families** — and compose them in a
-**multi-layer compositor**: stack up to 8 pattern layers over a permanent background
-layer, each with its own tiling, color theme, effects and animation. Every image can be
-exported as a full-resolution **PNG**, a **looping animated GIF**, or a **lossless APNG**
-(pixel-perfect animated PNG) — all encoded entirely in the browser and playable anywhere
-with no extra software, plugins or codecs.
+**Tessellate** (formerly "Einstein Wallpaper" / "Geometric Wallpaper Studio" — the
+repository keeps its original name `EinsteinWallpaper`) generates wallpapers from the
+**Einstein tile** (the aperiodic "hat" monotile discovered in 2023 by David Smith,
+Joseph Samuel Myers, C. S. Kaplan and Chaim Goodman-Strauss) — **plus 13 more
+mathematically verified tiling families** — and composes them in a **multi-layer
+compositor**: stack up to 8 pattern layers over a permanent background layer, each
+with its own tiling, color theme, effects and animation. Every image can be exported
+as a full-resolution **PNG**, a **looping animated GIF**, or a **lossless APNG**
+(pixel-perfect animated PNG) — all encoded entirely in the browser and playable
+anywhere with no extra software, plugins or codecs.
 
-![screenshot](docs/screenshot.png)
+![Tessellate — desktop](docs/img/hero.png)
+
+| Export menu (toolbar, after Save) | Mobile layout |
+|---|---|
+| ![Export menu](docs/img/export-menu.png) | ![Mobile](docs/img/mobile.png) |
 
 ## Features
 
@@ -28,7 +34,7 @@ with no extra software, plugins or codecs.
 | **Kites** | slim / classic / wide | Half-turn tessellation |
 | **Trihexagonal** | kagome, rotated 30° | Rectified honeycomb: hexagons + triangles |
 | **Octagon–square** | truncated square tiling | Regular octagons + 45° squares |
-| **Cairo pentagons** | dual of the snub square tiling | The classic Cairo mosaic pentagon (3 right-angle-free 120°s + two 90°s) |
+| **Cairo pentagons** | dual of the snub square tiling | The classic Cairo mosaic pentagon (three 120°s + two 90°s) |
 | **Penrose rhombs** | P3 standard, P3 golden shifts | Dual of a de Bruijn pentagrid; matching rules hold by construction; fat:thin → φ |
 
 Every family's geometry is verified by `tests/verify-tilings.js` (no overlaps, no
@@ -150,11 +156,15 @@ The removed v1 animations (Cascade, Drift, Hue cycle, Pulse) are gone.
 ### Canvas & export
 - Aspect presets 16:9, 16:10, 4:3, 5:4, 3:2, 21:9, 32:9, 1:1 and phone portraits
   (9:16, 9:19.5, 9:20) with standard resolutions from 720p to 4K+, plus custom
-  sizes up to 8192 px. Canvas size/aspect/resolution are the only global
-  settings — every layer renders into the same output coordinate space.
+  sizes up to 8192 px — set from the **Canvas** popover in the toolbar. Canvas
+  size/aspect/resolution are the only global settings — every layer renders
+  into the same output coordinate space.
 - Per layer: tile scale, rotation, tile gap, outline width/color, seeded
   randomization.
-- **All exports render the complete layer stack at the exact canvas resolution
+- The **Export** button in the toolbar (right after **Save**) opens a menu that
+  asks about the format — pick one and the export starts immediately; the menu
+  also carries a *Set as a live wallpaper* note with per-platform instructions.
+  **All exports render the complete layer stack at the exact canvas resolution
   you chose** — animated exports rebuild every layer at that resolution (1:1,
   same geometry math as the preview) and capture exactly one seamless combined
   animation loop (see *Layers* above for the multi-animation alignment).
@@ -188,9 +198,11 @@ single-color templates in `ew-single-templates-v1` and duotone pairs in
 **Reset** restores the whole default project.
 
 ### Toolbar, undo/redo
-A single **top toolbar** (PC) carries everything project-level; the sidebar
-below it keeps only the per-layer editing sections (Layers, Tiling, Color
-theme, Background layer, Visual effects, Animation, Export):
+A single **top toolbar** (PC) carries everything project-level — the **Tessellate
+logo + wordmark**, then the project name & save state, New, Random, Undo/Redo,
+Canvas, Save/Load, **Export**, Share, Fullscreen and About; the sidebar below it
+keeps only the per-layer editing sections (Layers, Tiling, Color theme,
+Background layer, Visual effects, Animation):
 
 - **Project name** — free-form (≤ 60 chars), shown in the toolbar, stored in the
   project and used for downloaded filenames (project JSON and exports).
@@ -212,6 +224,14 @@ theme, Background layer, Visual effects, Animation, Export):
   ONE undo step; up to 60 steps are kept; a new edit after an undo discards
   the redo tail. Unsaved palette/gradient drafts are snapshot too, so even
   those are undoable. Buttons show tooltips naming the next undo/redo step.
+- **Export** — opens the format menu (PNG / GIF / APNG) described above.
+- **Share** — hands the wallpaper to the operating system's share sheet
+  (`navigator.share`): a **PNG** while nothing animates, a seamless **GIF**
+  otherwise — with a graceful fallback to a normal download on browsers or
+  contexts (e.g. `file://`) without Web Share file support.
+- **Canvas** — popover with aspect ratio, orientation and resolution presets.
+- **About** — modal with credits + project reset; **Fullscreen** shows the raw
+  wallpaper edge to edge.
 
 **Project file (save/load as JSON):** *Save* in the toolbar downloads
 the entire project — all layers plus every custom palette, gradient and
@@ -219,18 +239,26 @@ template — as one self-contained JSON file; *Load* restores it on any
 machine. Agents can **generate wallpapers by writing that JSON** themselves:
 [docs/AGENT_GUIDE.md](docs/AGENT_GUIDE.md) documents every field, all built-in
 palette/gradient references, and includes ready-to-adapt examples (minimal,
-multi-layer, transparent). **Share** hands the wallpaper to the operating system's share sheet
-(`navigator.share`): a **PNG** while nothing animates, a seamless **GIF**
-otherwise — with a graceful fallback to a normal download on browsers or
-contexts (e.g. `file://`) without Web Share file support. The **Canvas**
-toolbar button opens a popover with aspect ratio, orientation and resolution
-presets; **About** opens a modal (credits + Reset), and **⊛ Fullscreen**
-shows the raw wallpaper edge to edge. On phones (≤ 760 px) the toolbar turns
+multi-layer, transparent). On phones (≤ 760 px) the toolbar turns
 icon-only, the canvas moves above the controls, every section starts
 collapsed, and a shortcut-chip row opens + scrolls to a section.
-
-Loader accepts the full wrapper, a bare project
+The loader accepts the full wrapper, a bare project
 object, and legacy v1 settings.
+
+## Examples
+
+Three minimal one-layer starter projects live in
+[`examples/`](examples/) — each is a single pattern layer over a background,
+saved as a bare JSON project object together with a full-resolution PNG
+rendered by the app's own exporter. Load a `.json` with **Load** in the
+toolbar and make it yours, or use them as templates for agent-generated
+wallpapers.
+
+| Project | Render |
+|---|---|
+| [hat-aurora.json](examples/hat-aurora.json) — the Einstein hat, Palette mode (Aurora), supertile arrangement over a solid midnight background | ![Hat Aurora](examples/hat-aurora.png) |
+| [hexagons-mint.json](examples/hexagons-mint.json) — flat honeycomb with the built-in Aurora gradient sweeping across, on a linear gradient background | ![Mint honeycombs](examples/hexagons-mint.png) |
+| [penrose-ember.json](examples/penrose-ember.json) — Penrose rhombs (golden) in a duotone checker arrangement over a radial ember glow | ![Ember Penrose](examples/penrose-ember.png) |
 
 ## Quick start
 
@@ -250,9 +278,9 @@ No build step, no server, no dependencies.
    only that mode's options are shown.
 3. Optionally add visual effects and an animation — both belong to the selected
    layer.
-4. Click **⬇ PNG** for a still, or **GIF (looping)** / **APNG (lossless)** for a
-   live wallpaper at the chosen canvas resolution — exports always render the
-   entire layer stack.
+4. Open the **Export** menu in the toolbar (after Save) and pick **PNG** for a
+   still, or **GIF** / **APNG** for a live wallpaper at the chosen canvas
+   resolution — exports always render the entire layer stack.
 
 ### Live wallpapers
 
@@ -289,9 +317,11 @@ js/infotips.js        hover info tips: the small (i) icons in section headers
                       show each section's help in a shared floating bubble
 js/app.js             UI wiring, layer compositor, caches, exports, persistence,
                       project-file save/load (JSON), undo/redo integration
+examples/             minimal one-layer starter projects (JSON + rendered PNG)
 tests/                geometry + unit verification (see below)
 docs/AGENT_GUIDE.md   JSON project-format reference for agents: generate a
                       wallpaper by writing the project JSON and loading it
+docs/img/             screenshots used by this README
 ```
 
 ## Verification
@@ -326,27 +356,88 @@ bun tests/test-layers.js
 bun tests/test-history.js
 ```
 
-`scripts/qa_studio.py` (development machine only; needs Playwright) drives the real
-UI in headless Chromium: loads the app, renders every family, switches color theme
-modes, edits palettes and gradients, applies effects, checks animation frames, and
-exercises PNG/GIF/APNG export at the chosen canvas resolution. `scripts/qa_layers.py`
-covers the layer system end to end (stack operations, per-layer independence,
-alpha compositing, migration, persistence, exports incl. transparency),
-`scripts/qa_undoredo.py` covers the project toolbar (name + save indicator),
-undo/redo (buttons, Ctrl+Z/Y, coalescing, redo-tail truncation, structural
-ops) and the section-scoped 🎲 randomizers, and `scripts/qa_apng.py`
-additionally proves the APNG export is pixel-perfect by comparing the decoded file
-byte-for-byte against an in-page reference render.
+Additional Playwright-driven end-to-end QA suites run on the development
+machine only (not part of the repo): they drive the real UI in headless
+Chromium across the toolbar/export menu, layer system, undo/redo, special
+effects, GIF/APNG exports and the mobile layout, and prove e.g. that the
+APNG export is pixel-perfect by comparing the decoded file byte-for-byte
+against an in-page reference render.
 
-## Credits
+## Acknowledgment — AI-assisted development
 
-- Mathematical construction: D. Smith, J. S. Myers, C. S. Kaplan, C. Goodman-Strauss,
-  *"An Aperiodic Monotile"*, arXiv:2303.10798 (2023) — https://cs.uwaterloo.ca/~csk/hat/
-- Penrose rhombs generated as the dual of a de Bruijn pentagrid
-  (N. G. de Bruijn, *Algebraic theory of Penrose's non-periodic tilings*, 1981).
-- Cairo pentagonal tiling constructed as the dual of the snub square tiling.
-- Inspired by the Quanta Magazine coverage of the 2023 discovery.
+This project was **implemented with the help of an AI coding assistant**:
+[Z.ai](https://z.ai)'s **GLM** model, used through Z.ai's agentic coding
+environment. The repository owner, **Reza Bahrami**, directed the work —
+he specified every feature and its behavior in successive iterations,
+requested the reworks and refinements, set the quality bar for the UI and
+the export formats, and reviewed and accepted each step. The AI assistant
+wrote the application code, the encoders, the test suites, the QA scripts
+and the documentation under that direction. All design decisions, final
+acceptance, and publication are the owner's.
+
+## Disclaimers
+
+- **No warranty.** This software is provided "as is", without warranty of any
+  kind, express or implied — see the [MIT license](LICENSE). Use at your own
+  risk; the author is not liable for any damages or data loss.
+- **AI-generated code.** Substantial parts of this codebase were written by an
+  AI model under human direction. It is heavily tested (geometry/unit suites
+  plus end-to-end UI QA), but AI-assisted code can still contain defects.
+  Review anything you rely on, and please report issues you find.
+- **No affiliation or endorsement.** This project is an independent fan/creator
+  work. It is not affiliated with, endorsed by, or sponsored by the discoverers
+  of the hat tile, the University of Waterloo, Z.ai, Quanta Magazine, or the
+  makers of Lively Wallpaper or Wallpaper Engine. All third-party names,
+  products and trademarks belong to their respective owners and are referenced
+  here descriptively only.
+- **Privacy.** Tessellate is fully offline and static: no accounts, no
+  analytics, no network requests. Your projects live in your own browser's
+  storage and in the files you save.
+- **Third-party live-wallpaper tools.** The live-wallpaper how-to names
+  external applications as a convenience; follow their own terms and review
+  their permissions before installing anything.
+- **Math & rendering.** Tiling constructions follow the published references
+  below and are covered by automated geometry tests, but neither the author
+  nor the AI assistant guarantees the output is free of mathematical or visual
+  defects in every configuration.
+
+## References & citations
+
+1. D. Smith, J. S. Myers, C. S. Kaplan, C. Goodman-Strauss,
+   **"An Aperiodic Monotile"**, arXiv:2303.10798 (2023),
+   https://arxiv.org/abs/2303.10798 — published in *Combinatorial Theory*
+   (2024). Project page: https://cs.uwaterloo.ca/~csk/hat/ — source of the
+   metatile substitution construction behind the `hat` family.
+2. D. Smith, J. S. Myers, C. S. Kaplan, C. Goodman-Strauss,
+   **"A chiral aperiodic monotile"** (the Spectre tile), arXiv:2305.17767
+   (2023), https://arxiv.org/abs/2305.17767 — related background for the
+   aperiodic-monotile family of results.
+3. C. S. Kaplan, **hatviz** — reference implementation of the hat substitution
+   algorithm, https://github.com/isohedral/hatviz — consulted when porting the
+   metatile rules in `js/hat-tiling.js`.
+4. N. G. de Bruijn, **"Algebraic theory of Penrose's non-periodic tilings of
+   the plane"**, Nederl. Akad. Wetensch. Indag. Math. 43 (1981) 39–66 — the
+   pentagrid duality used by the `penrose` family.
+5. B. Grünbaum, G. C. Shephard, **"Tilings and Patterns"**, W. H. Freeman
+   (1987) — general reference for the periodic tiling families (honeycomb,
+   kagome/trihexagonal, octagon–square, Cairo pentagons and friends).
+6. W3C/microsoft, **"GIF89a Specification"**,
+   https://www.w3.org/Graphics/GIF/spec-gif89a.txt — implemented from scratch
+   in `js/gif.js`.
+7. Mozilla, **"APNG Specification"**,
+   https://wiki.mozilla.org/APNG_Specification — implemented from scratch in
+   `js/apng.js`.
+8. MDN Web Docs, **Web Share API** (navigator.share / canShare),
+   https://developer.mozilla.org/en-US/docs/Web/API/Web_Share_API, and
+   **Canvas API**, https://developer.mozilla.org/en-US/docs/Web/API/Canvas_API
+   — rendering and sharing foundations.
+9. S. Hartnett, **"Hobbyist Finds Math's Elusive 'Einstein' Tile"**,
+   Quanta Magazine (March 2023),
+   https://www.quantamagazine.org/hobbyist-finds-maths-elusive-einstein-tile-20230328/
+   — inspiration and accessible coverage of the discovery.
+10. R. Danister, **Lively Wallpaper**, https://www.rocksdanister.com/lively —
+    third-party tool mentioned in the live-wallpaper how-to.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — Copyright © 2026 Reza Bahrami. See [LICENSE](LICENSE).

@@ -3,10 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Einstein Wallpaper — Geometric Wallpaper Studio</title>
-<meta name="description" content="Geometric wallpaper studio with a multi-layer compositor: stack pattern layers over a background layer, each with its own tiling family, color theme, effects and animation. Export PNG, looping GIF or lossless APNG live wallpapers.">
+<title>Tessellate — Geometric Wallpaper Studio</title>
+<meta name="description" content="Tessellate — geometric wallpaper studio with a multi-layer compositor: stack pattern layers over a background layer, each with its own tiling family, color theme, effects and animation. Export PNG, looping GIF or lossless APNG live wallpapers.">
 <link rel="stylesheet" href="css/style.css">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%230b1020'/%3E%3Cpath d='M8 10 L14 6 L20 10 L26 8 L26 16 L20 22 L12 24 L8 18 Z' fill='%235bc8ff'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 36'%3E%3Crect width='48' height='36' fill='%230b1020'/%3E%3Cpath d='M13.6 13.1 L4 7.5 L7.2 2 L20 2 L23.2 7.5 L32.8 2 L42.4 7.5 L39.2 13.1 L32.8 13.1 L32.8 24.2 L23.2 29.7 L20 24.2 L10.4 24.2 Z' fill='%235bc8ff'/%3E%3C/svg%3E">
 </head>
 <body>
 <div id="app">
@@ -14,7 +14,17 @@
   <!-- ======================= TOP TOOLBAR (PC) ======================= -->
   <div id="toolbar">
     <div class="tgroup brand">
-      <span class="logo-hat" title="Geometric Wallpaper Studio"></span>
+      <svg id="logoSvg" viewBox="0 0 48 36" role="img" aria-label="Tessellate — geometric wallpaper studio" title="Tessellate">
+        <defs>
+          <linearGradient id="lgHat" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#5bc8ff"/>
+            <stop offset="1" stop-color="#8f7bff"/>
+          </linearGradient>
+        </defs>
+        <path d="M13.6 13.1 L4 7.5 L7.2 2 L20 2 L23.2 7.5 L32.8 2 L42.4 7.5 L39.2 13.1 L32.8 13.1 L32.8 24.2 L23.2 29.7 L20 24.2 L10.4 24.2 Z"
+              fill="url(#lgHat)" stroke="#0b1020" stroke-width="1" stroke-linejoin="round"/>
+      </svg>
+      <span class="brandname">Tessellate</span>
       <input type="text" id="projName" spellcheck="false" autocomplete="off"
              maxlength="60" placeholder="Project name"
              title="Project name — travels with saved files and exports">
@@ -64,6 +74,31 @@
       <button id="projSaveBtn" class="tbtn" title="Download the whole project as a JSON file"><span class="tico">💾</span><span class="tlabel">Save</span></button>
       <button id="projLoadBtn" class="tbtn" title="Load a project JSON file"><span class="tico">📂</span><span class="tlabel">Load</span></button>
       <input type="file" id="projFile" accept=".json,application/json" hidden>
+    </div>
+    <div class="tgroup">
+      <div class="popwrap">
+        <button id="exportBtn" class="tbtn" title="Export the wallpaper: PNG image, looping GIF or lossless APNG"><span class="tico">⬇</span><span class="tlabel">Export</span></button>
+        <div id="exportPop" class="pop popmenu" hidden>
+          <div class="pophead">Export wallpaper</div>
+          <button id="pngBtn" class="popitem" title="Still image at the exact canvas resolution; true RGBA transparency when the Background layer is hidden or faded">
+            <span class="pilabel">PNG</span>
+            <span class="pidesc">Still image · full resolution · transparency</span>
+          </button>
+          <button id="gifBtn" class="popitem" title="Compact looping animation; 256 colors with dithering; transparent projects are flattened onto black">
+            <span class="pilabel">GIF</span>
+            <span class="pidesc">Looping animation · compact 256-color</span>
+          </button>
+          <button id="apngBtn" class="popitem" title="Lossless looping animation; truecolor quality identical to the live preview">
+            <span class="pilabel">APNG</span>
+            <span class="pidesc">Looping animation · lossless truecolor</span>
+          </button>
+          <details class="popnote">
+            <summary>Set as a live wallpaper</summary>
+            <p><b>Windows:</b> install <i>Lively Wallpaper</i> (free) → Add Wallpaper → paste this page's URL as a web wallpaper, or drop the exported GIF/APNG in as a video wallpaper.</p>
+            <p><b>Android:</b> set the exported GIF/APNG with any “video live wallpaper” app, or use Wallpaper Engine.</p>
+          </details>
+        </div>
+      </div>
     </div>
     <div class="tgroup">
       <button id="shareBtn" class="tbtn share" title="Share via this device (OS share sheet): PNG when nothing animates, GIF otherwise"><span class="tico">📤</span><span class="tlabel">Share</span></button>
@@ -478,19 +513,6 @@
         </div>
       </details>
 
-      <details open id="sec-export">
-        <summary>Export &amp; live wallpaper<span class="infotip push" tabindex="0" role="button" aria-label="Export help" aria-expanded="false"><span class="tipcontent" hidden>Exports always render the complete layer stack at the canvas resolution chosen in the toolbar <b>Canvas</b> menu — no third-party software or codec needed to play them. <b>PNG/APNG</b> keep true RGBA transparency when the Background layer is hidden or faded; <b>GIF</b> has no partial alpha, so transparent projects are flattened onto black. <b>GIF</b> is compact (256 colors + dithering); <b>APNG</b> is pixel-perfect lossless truecolor. The toolbar <b>Share</b> button hands a PNG (or GIF, when something animates) to the OS share sheet.<br><b>Windows:</b> install <i>Lively Wallpaper</i> (free) → Add Wallpaper → paste this page's URL as a web wallpaper, or drop the exported GIF/APNG in as a video wallpaper.<br><b>Android:</b> set the exported GIF/APNG with any “video live wallpaper” app, or use Wallpaper Engine.</span></span></summary>
-        <div class="body">
-          <div class="btnrow">
-            <button id="pngBtn" class="btn">⬇ PNG</button>
-            <button id="gifBtn" class="btn">GIF (looping)</button>
-          </div>
-          <div class="btnrow">
-            <button id="apngBtn" class="btn">APNG (lossless)</button>
-          </div>
-        </div>
-      </details>
-
     </div>
   </aside>
 
@@ -505,10 +527,10 @@
 <!-- ======================= ABOUT MODAL ======================= -->
 <div id="modalWrap" hidden>
   <div id="aboutCard" role="dialog" aria-modal="true" aria-labelledby="aboutTitle">
-    <h2 id="aboutTitle">Geometric Wallpaper Studio</h2>
-    <p class="sub">Einstein hat &amp; 13 tiling families · PNG / GIF / APNG exports</p>
+    <h2 id="aboutTitle">Tessellate</h2>
+    <p class="sub">Geometric wallpaper studio · Einstein hat &amp; 13 tiling families · PNG / GIF / APNG exports</p>
     <p>A studio for the aperiodic <b>Einstein hat</b> monotile (Smith, Myers, Kaplan &amp; Goodman-Strauss 2023 — <i>An Aperiodic Monotile</i>, arXiv:2303.10798) plus a collection of mathematically verified periodic and composite tilings: honeycombs, kagome, octagon–square, Cairo pentagons (dual of the snub square tiling), herringbone, Penrose rhombs (dual of a de Bruijn pentagrid) and more. Stack pattern layers over a background layer, give each its own tiling, colors, effects and animation, then export or share the result.</p>
-    <p>The project is auto-saved in this browser as you edit. <b>Save</b> downloads it as one <b>JSON</b> file (all layers + custom palettes/gradients) — the format is documented in <b>docs/AGENT_GUIDE.md</b>, so agents can generate wallpapers by writing that file and loading it here. <b>Undo/Redo (Ctrl+Z / Ctrl+Y)</b> reverts any change, including layer operations and randomizers. <b>Share</b> uses the operating system share sheet when available: PNG while nothing animates, looping GIF otherwise (falls back to a download where sharing is unsupported).</p>
+    <p>The project is auto-saved in this browser as you edit. <b>Save</b> downloads it as one <b>JSON</b> file (all layers + custom palettes/gradients) — the format is documented in <b>docs/AGENT_GUIDE.md</b>, so agents can generate wallpapers by writing that file and loading it here. <b>Undo/Redo (Ctrl+Z / Ctrl+Y)</b> reverts any change, including layer operations and randomizers. The <b>Export</b> menu offers PNG, looping GIF and lossless APNG — every format renders the complete layer stack at the resolution set in the Canvas menu. <b>Share</b> uses the operating system share sheet when available: PNG while nothing animates, looping GIF otherwise (falls back to a download where sharing is unsupported).</p>
     <div class="btnrow">
       <button id="resetBtn" class="btn ghost" title="Reset to the default starter project (background + one pattern layer)">Reset project</button>
       <button id="aboutClose" class="btn">Close</button>

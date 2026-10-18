@@ -1,0 +1,39 @@
+{
+  "name": "Ember Penrose",
+  "aspect": "16:9",
+  "orientation": "landscape",
+  "resW": 1920,
+  "resH": 1080,
+  "layers": [
+    {
+      "type": "background",
+      "bg": {
+        "source": "gradient",
+        "gradient": {
+          "type": "radial",
+          "angle": 0,
+          "stops": [
+            { "pos": 0, "color": "#3d1522" },
+            { "pos": 0.6, "color": "#1c0f1e" },
+            { "pos": 1, "color": "#0b0713" }
+          ]
+        }
+      }
+    },
+    {
+      "type": "pattern",
+      "name": "Ember rhombs",
+      "family": "penrose",
+      "variant": "golden",
+      "tileSize": 72,
+      "rotation": 0,
+      "seed": 11,
+      "theme": {
+        "mode": "duotone",
+        "duoMap": "checker",
+        "duoA": "#ffd9a0",
+        "duoB": "#b13a5e"
+      }
+    }
+  ]
+}

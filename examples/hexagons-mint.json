@@ -1,0 +1,39 @@
+{
+  "name": "Mint honeycombs",
+  "aspect": "16:9",
+  "orientation": "landscape",
+  "resW": 1920,
+  "resH": 1080,
+  "layers": [
+    {
+      "type": "background",
+      "bg": {
+        "source": "gradient",
+        "gradient": {
+          "type": "linear",
+          "angle": 120,
+          "stops": [
+            { "pos": 0, "color": "#07131a" },
+            { "pos": 1, "color": "#12352c" }
+          ]
+        }
+      }
+    },
+    {
+      "type": "pattern",
+      "name": "Mint honeycomb",
+      "family": "hexagons",
+      "variant": "flat",
+      "tileSize": 56,
+      "rotation": 0,
+      "seed": 7,
+      "gap": 0.03,
+      "outlineWidth": 1.4,
+      "theme": {
+        "mode": "gradient",
+        "gradMap": "sweep",
+        "gradientId": "bi-aurora"
+      }
+    }
+  ]
+}

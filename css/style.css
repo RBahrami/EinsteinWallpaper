@@ -39,7 +39,13 @@ body {
 .tgroup { display: flex; align-items: center; gap: 6px; flex: none; }
 .tgroup.right { margin-left: auto; }
 .tgroup.brand { min-width: 0; margin-right: 4px; }
-.tgroup.brand .logo-hat { width: 24px; height: 24px; }
+#logoSvg { width: 27px; height: 21px; flex: none; display: block; }
+.brandname {
+  font-weight: 700; font-size: 15.5px; letter-spacing: .5px;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  -webkit-background-clip: text; background-clip: text;
+  color: transparent; white-space: nowrap; margin-right: 5px;
+}
 .tbtn {
   height: 32px; padding: 0 11px;
   font: inherit; font-weight: 600; font-size: 12px;
@@ -82,6 +88,30 @@ body {
   box-shadow: 0 14px 44px rgba(0,0,0,.55);
 }
 .pop[hidden] { display: none; }
+
+/* export menu popover (toolbar, next to Save/Load) */
+.popmenu { width: 276px; padding: 8px; }
+.pophead {
+  font-size: 10.5px; font-weight: 700; letter-spacing: .8px;
+  text-transform: uppercase; color: var(--dim); padding: 2px 6px 6px;
+}
+.popitem {
+  display: block; width: 100%; text-align: left;
+  padding: 8px 10px; margin: 2px 0;
+  background: transparent; color: var(--text);
+  border: 1px solid transparent; border-radius: 8px;
+  font: inherit; cursor: pointer; transition: all .12s;
+}
+.popitem:hover { border-color: #3a4b66; background: #212531; }
+.popitem .pilabel { display: block; font-weight: 700; font-size: 13px; }
+.popitem .pidesc { display: block; color: var(--dim); font-size: 11px; margin-top: 1px; }
+.popitem:disabled { opacity: .45; cursor: default; }
+.popnote {
+  border-top: 1px solid var(--line); margin-top: 7px;
+  padding: 7px 6px 3px; font-size: 11px; color: var(--dim);
+}
+.popnote summary { cursor: pointer; font-weight: 600; color: var(--text); }
+.popnote p { margin: 6px 0; line-height: 1.55; }
 
 /* ---------------- about modal ---------------- */
 #modalWrap {
@@ -276,7 +306,8 @@ label.check input { accent-color: var(--accent); }
 @media (max-width: 760px) {
   /* toolbar: compact, wraps to two rows, icon-only buttons */
   #toolbar { padding: 6px 8px; gap: 6px; }
-  .tgroup.brand .logo-hat { display: none; }
+  .brandname { display: none; }
+  #logoSvg { width: 24px; height: 18px; }
   #toolbar #projName { width: 110px; }
   .tbtn { height: 36px; padding: 0 10px; font-size: 13px; }
   .tbtn .tlabel { display: none; }
