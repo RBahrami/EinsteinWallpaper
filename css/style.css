@@ -129,6 +129,10 @@ body {
 #aboutCard .sub { margin: 0 0 10px; color: var(--accent); font-size: 11.5px; letter-spacing: .3px; }
 #aboutCard p { color: var(--dim); font-size: 12.5px; line-height: 1.6; }
 #aboutCard b { color: var(--text); }
+#aboutCard .aboutrule { border: 0; border-top: 1px solid #333a4c; margin: 14px 0 10px; }
+#aboutCard .credits p { font-size: 12px; margin: 4px 0; }
+#aboutCard .credits a { color: var(--accent); text-decoration: none; }
+#aboutCard .credits a:hover { text-decoration: underline; }
 
 /* ---------------- sidebar ---------------- */
 #sidebar {
