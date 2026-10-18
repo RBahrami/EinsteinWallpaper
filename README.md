@@ -390,9 +390,13 @@ acceptance, and publication are the owner's.
   makers of Lively Wallpaper or Wallpaper Engine. All third-party names,
   products and trademarks belong to their respective owners and are referenced
   here descriptively only.
-- **Privacy.** Tessellate is fully offline and static: no accounts, no
-  analytics, no network requests. Your projects live in your own browser's
-  storage and in the files you save.
+- **Privacy.** Tessellate itself is fully offline and static: no accounts, no
+  network requests. Your projects live in your own browser's storage and in the
+  files you save. The one exception is the published GitHub Pages copy, which
+  loads a single anonymous, cookie-free analytics beacon (Cloudflare Web
+  Analytics) so the author can see aggregate visit counts — no cookies, no
+  personal data, no cross-site tracking. Local/offline use of the app (opening
+  `index.html` directly) loads nothing at all.
 - **Third-party live-wallpaper tools.** The live-wallpaper how-to names
   external applications as a convenience; follow their own terms and review
   their permissions before installing anything.
