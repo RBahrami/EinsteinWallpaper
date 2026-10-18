@@ -187,12 +187,19 @@ single-color templates in `ew-single-templates-v1` and duotone pairs in
 `ew-duo-templates-v1` — all with stable IDs and defensive parsing.
 **Reset** restores the whole default project.
 
-### Project bar, undo/redo
-The **project bar** sits at the top of the sidebar and carries everything
-project-level:
+### Toolbar, undo/redo
+A single **top toolbar** (PC) carries everything project-level; the sidebar
+below it keeps only the per-layer editing sections (Layers, Tiling, Color
+theme, Background layer, Visual effects, Animation, Export):
 
-- **Project name** — free-form (≤ 60 chars), shown in the bar, stored in the
+- **Project name** — free-form (≤ 60 chars), shown in the toolbar, stored in the
   project and used for downloaded filenames (project JSON and exports).
+- **New** — starts a fresh background-only project (the Background layer
+  alone; pattern sections hide until a pattern layer is added). Background-only
+  projects are first-class: they save, load, export and share like any other.
+- **Random** — one click, one wallpaper: a fresh randomized pattern layer over
+  a randomized background. Canvas size and project name are kept, and the
+  whole change is a single undo step.
 - **Save indicator** — `✓ saved HH:MM` once the autosave has caught up, and a
   `● unsaved draft` warning while a live palette/gradient edit is only a
   runtime draft (save it as a custom template to keep it). Saving a project
@@ -206,13 +213,23 @@ project-level:
   the redo tail. Unsaved palette/gradient drafts are snapshot too, so even
   those are undoable. Buttons show tooltips naming the next undo/redo step.
 
-**Project file (save/load as JSON):** *Save file* in the project bar downloads
+**Project file (save/load as JSON):** *Save* in the toolbar downloads
 the entire project — all layers plus every custom palette, gradient and
 template — as one self-contained JSON file; *Load* restores it on any
 machine. Agents can **generate wallpapers by writing that JSON** themselves:
 [docs/AGENT_GUIDE.md](docs/AGENT_GUIDE.md) documents every field, all built-in
 palette/gradient references, and includes ready-to-adapt examples (minimal,
-multi-layer, transparent). Loader accepts the full wrapper, a bare project
+multi-layer, transparent). **Share** hands the wallpaper to the operating system's share sheet
+(`navigator.share`): a **PNG** while nothing animates, a seamless **GIF**
+otherwise — with a graceful fallback to a normal download on browsers or
+contexts (e.g. `file://`) without Web Share file support. The **Canvas**
+toolbar button opens a popover with aspect ratio, orientation and resolution
+presets; **About** opens a modal (credits + Reset), and **⊛ Fullscreen**
+shows the raw wallpaper edge to edge. On phones (≤ 760 px) the toolbar turns
+icon-only, the canvas moves above the controls, every section starts
+collapsed, and a shortcut-chip row opens + scrolls to a section.
+
+Loader accepts the full wrapper, a bare project
 object, and legacy v1 settings.
 
 ## Quick start
@@ -249,7 +266,7 @@ No build step, no server, no dependencies.
 ## Project layout
 
 ```
-index.html            UI (sidebar + live preview canvas)
+index.html            UI (top toolbar + sidebar sections + live preview canvas)
 css/style.css         dark minimal theme
 js/hat-tiling.js      Einstein hat metatile engine (browser & Node, unchanged)
 js/layers.js          layer model: project schema, v1→v2 migration, validation,
@@ -315,7 +332,7 @@ modes, edits palettes and gradients, applies effects, checks animation frames, a
 exercises PNG/GIF/APNG export at the chosen canvas resolution. `scripts/qa_layers.py`
 covers the layer system end to end (stack operations, per-layer independence,
 alpha compositing, migration, persistence, exports incl. transparency),
-`scripts/qa_undoredo.py` covers the project bar (name + save indicator),
+`scripts/qa_undoredo.py` covers the project toolbar (name + save indicator),
 undo/redo (buttons, Ctrl+Z/Y, coalescing, redo-tail truncation, structural
 ops) and the section-scoped 🎲 randomizers, and `scripts/qa_apng.py`
 additionally proves the APNG export is pixel-perfect by comparing the decoded file

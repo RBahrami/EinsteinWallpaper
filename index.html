@@ -11,51 +11,36 @@
 <body>
 <div id="app">
 
-  <aside id="sidebar">
-    <header>
-      <div class="logo">
-        <span class="logo-hat"></span>
-        <div>
-          <h1>Geometric Studio</h1>
-          <p class="sub">Einstein hat &amp; 13 tiling families</p>
-        </div>
-      </div>
-    </header>
-
-    <!-- ======================= PROJECT BAR ======================= -->
-    <div id="projectBar">
-      <div class="prow">
-        <input type="text" id="projName" spellcheck="false" autocomplete="off"
-               maxlength="60" placeholder="Project name"
-               title="Project name — travels with saved files and exports">
-        <span id="saveState" class="sv ok" title="All changes are auto-saved in this browser">✓ saved</span>
-        <span class="infotip" tabindex="0" role="button" aria-label="Project help" aria-expanded="false"><span class="tipcontent" hidden>The project is auto-saved in this browser as you edit. <b>Save file</b> downloads it as one <b>JSON</b> file (all layers + custom palettes/gradients) — the format is documented in <b>docs/AGENT_GUIDE.md</b>, so agents can generate wallpapers by writing that file and loading it here. <b>Undo/Redo (Ctrl+Z / Ctrl+Y)</b> reverts any change, including layer operations and randomizers.</span></span>
-      </div>
-      <div class="prow btns">
-        <button id="undoBtn" class="btn mini" title="Undo (Ctrl+Z)" disabled>↶ Undo</button>
-        <button id="redoBtn" class="btn mini" title="Redo (Ctrl+Y)" disabled>↷ Redo</button>
-        <button id="projSaveBtn" class="btn mini" title="Download the whole project as a JSON file">💾 Save file</button>
-        <button id="projLoadBtn" class="btn mini" title="Load a project JSON file">📂 Load</button>
-        <input type="file" id="projFile" accept=".json,application/json" hidden>
-      </div>
+  <!-- ======================= TOP TOOLBAR (PC) ======================= -->
+  <div id="toolbar">
+    <div class="tgroup brand">
+      <span class="logo-hat" title="Geometric Wallpaper Studio"></span>
+      <input type="text" id="projName" spellcheck="false" autocomplete="off"
+             maxlength="60" placeholder="Project name"
+             title="Project name — travels with saved files and exports">
+      <span id="saveState" class="sv ok" title="All changes are auto-saved in this browser">✓ saved</span>
     </div>
-
-    <div id="controls">
-
-      <details open>
-        <summary>Canvas</summary>
-        <div class="body">
+    <div class="tgroup">
+      <button id="newBgBtn" class="tbtn" title="New project: background only (no pattern layers)"><span class="tico">✚</span><span class="tlabel">New</span></button>
+      <button id="randWallBtn" class="tbtn accent" title="Random wallpaper: one fresh pattern layer over a random background"><span class="tico">🎲</span><span class="tlabel">Random</span></button>
+    </div>
+    <div class="tgroup">
+      <button id="undoBtn" class="tbtn" title="Undo (Ctrl+Z)" disabled>↶</button>
+      <button id="redoBtn" class="tbtn" title="Redo (Ctrl+Y)" disabled>↷</button>
+    </div>
+    <div class="tgroup">
+      <div class="popwrap">
+        <button id="canvasBtn" class="tbtn" title="Canvas: aspect ratio, orientation, resolution"><span class="tico">🖼</span><span class="tlabel">Canvas</span></button>
+        <div id="canvasPop" class="pop" hidden>
           <div class="row">
             <label>Aspect ratio</label>
             <div id="aspectChips" class="chips"></div>
           </div>
-          <div class="row two">
-            <div>
-              <label>Orientation</label>
-              <div class="chips">
-                <button class="chip" data-orient="landscape">Landscape</button>
-                <button class="chip" data-orient="portrait">Portrait</button>
-              </div>
+          <div class="row">
+            <label>Orientation</label>
+            <div class="chips">
+              <button class="chip" data-orient="landscape">Landscape</button>
+              <button class="chip" data-orient="portrait">Portrait</button>
             </div>
           </div>
           <div class="row">
@@ -73,9 +58,29 @@
             </div>
           </div>
         </div>
-      </details>
+      </div>
+    </div>
+    <div class="tgroup">
+      <button id="projSaveBtn" class="tbtn" title="Download the whole project as a JSON file"><span class="tico">💾</span><span class="tlabel">Save</span></button>
+      <button id="projLoadBtn" class="tbtn" title="Load a project JSON file"><span class="tico">📂</span><span class="tlabel">Load</span></button>
+      <input type="file" id="projFile" accept=".json,application/json" hidden>
+    </div>
+    <div class="tgroup">
+      <button id="shareBtn" class="tbtn share" title="Share via this device (OS share sheet): PNG when nothing animates, GIF otherwise"><span class="tico">📤</span><span class="tlabel">Share</span></button>
+    </div>
+    <div class="tgroup right">
+      <button id="fsBtn" class="tbtn" title="Fullscreen preview (F)">⛶</button>
+      <button id="aboutBtn" class="tbtn" title="About this studio">ℹ</button>
+    </div>
+  </div>
 
-      <details open>
+  <div id="main">
+  <aside id="sidebar">
+    <div id="secNav" class="secnav" aria-label="Section shortcuts"></div>
+
+    <div id="controls">
+
+      <details open id="sec-layers">
         <summary>Layers<span class="infotip push" tabindex="0" role="button" aria-label="Layers help" aria-expanded="false"><span class="tipcontent" hidden>Click a layer to edit it in the sections below. The <b>Background</b> layer is pinned to the bottom — it cannot be deleted or reordered. Every pattern layer keeps its own tiling, colors, effects and animation; exports render the whole stack. <b>Randomize layer</b> (and the 🎲 buttons in each section) act on the <b>selected layer only</b>.</span></span></summary>
         <div class="body">
           <div id="layerList"></div>
@@ -473,8 +478,8 @@
         </div>
       </details>
 
-      <details open>
-        <summary>Export &amp; live wallpaper<span class="infotip push" tabindex="0" role="button" aria-label="Export help" aria-expanded="false"><span class="tipcontent" hidden>Exports always render the complete layer stack at the canvas resolution chosen above — no third-party software or codec needed to play them. <b>PNG/APNG</b> keep true RGBA transparency when the Background layer is hidden or faded; <b>GIF</b> has no partial alpha, so transparent projects are flattened onto black. <b>GIF</b> is compact (256 colors + dithering); <b>APNG</b> is pixel-perfect lossless truecolor.<br><b>Windows:</b> install <i>Lively Wallpaper</i> (free) → Add Wallpaper → paste this page's URL as a web wallpaper, or drop the exported GIF/APNG in as a video wallpaper.<br><b>Android:</b> set the exported GIF/APNG with any “video live wallpaper” app, or use Wallpaper Engine.</span></span></summary>
+      <details open id="sec-export">
+        <summary>Export &amp; live wallpaper<span class="infotip push" tabindex="0" role="button" aria-label="Export help" aria-expanded="false"><span class="tipcontent" hidden>Exports always render the complete layer stack at the canvas resolution chosen in the toolbar <b>Canvas</b> menu — no third-party software or codec needed to play them. <b>PNG/APNG</b> keep true RGBA transparency when the Background layer is hidden or faded; <b>GIF</b> has no partial alpha, so transparent projects are flattened onto black. <b>GIF</b> is compact (256 colors + dithering); <b>APNG</b> is pixel-perfect lossless truecolor. The toolbar <b>Share</b> button hands a PNG (or GIF, when something animates) to the OS share sheet.<br><b>Windows:</b> install <i>Lively Wallpaper</i> (free) → Add Wallpaper → paste this page's URL as a web wallpaper, or drop the exported GIF/APNG in as a video wallpaper.<br><b>Android:</b> set the exported GIF/APNG with any “video live wallpaper” app, or use Wallpaper Engine.</span></span></summary>
         <div class="body">
           <div class="btnrow">
             <button id="pngBtn" class="btn">⬇ PNG</button>
@@ -486,16 +491,6 @@
         </div>
       </details>
 
-      <details>
-        <summary>About<span class="infotip push" tabindex="0" role="button" aria-label="About help" aria-expanded="false"><span class="tipcontent" hidden>A studio for the aperiodic <b>Einstein hat</b> monotile (Smith, Myers, Kaplan &amp; Goodman-Strauss 2023 — <i>An Aperiodic Monotile</i>, arXiv:2303.10798) plus a collection of mathematically verified periodic and composite tilings: honeycombs, kagome, octagon–square, Cairo pentagons (dual of the snub square tiling), herringbone, Penrose rhombs (dual of a de Bruijn pentagrid) and more.</span></span></summary>
-        <div class="body">
-          <div class="btnrow">
-            <button id="fsBtn" class="btn">⛶ Fullscreen</button>
-            <button id="resetBtn" class="btn ghost">Reset</button>
-          </div>
-        </div>
-      </details>
-
     </div>
   </aside>
 
@@ -503,8 +498,24 @@
     <div id="canvasWrap"><canvas id="preview"></canvas></div>
     <div id="status">…</div>
   </main>
+  </div>
 
 </div>
+
+<!-- ======================= ABOUT MODAL ======================= -->
+<div id="modalWrap" hidden>
+  <div id="aboutCard" role="dialog" aria-modal="true" aria-labelledby="aboutTitle">
+    <h2 id="aboutTitle">Geometric Wallpaper Studio</h2>
+    <p class="sub">Einstein hat &amp; 13 tiling families · PNG / GIF / APNG exports</p>
+    <p>A studio for the aperiodic <b>Einstein hat</b> monotile (Smith, Myers, Kaplan &amp; Goodman-Strauss 2023 — <i>An Aperiodic Monotile</i>, arXiv:2303.10798) plus a collection of mathematically verified periodic and composite tilings: honeycombs, kagome, octagon–square, Cairo pentagons (dual of the snub square tiling), herringbone, Penrose rhombs (dual of a de Bruijn pentagrid) and more. Stack pattern layers over a background layer, give each its own tiling, colors, effects and animation, then export or share the result.</p>
+    <p>The project is auto-saved in this browser as you edit. <b>Save</b> downloads it as one <b>JSON</b> file (all layers + custom palettes/gradients) — the format is documented in <b>docs/AGENT_GUIDE.md</b>, so agents can generate wallpapers by writing that file and loading it here. <b>Undo/Redo (Ctrl+Z / Ctrl+Y)</b> reverts any change, including layer operations and randomizers. <b>Share</b> uses the operating system share sheet when available: PNG while nothing animates, looping GIF otherwise (falls back to a download where sharing is unsupported).</p>
+    <div class="btnrow">
+      <button id="resetBtn" class="btn ghost" title="Reset to the default starter project (background + one pattern layer)">Reset project</button>
+      <button id="aboutClose" class="btn">Close</button>
+    </div>
+  </div>
+</div>
+
 <script src="js/hat-tiling.js"></script>
 <script src="js/layers.js"></script>
 <script src="js/history.js"></script>

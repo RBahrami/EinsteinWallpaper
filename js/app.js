@@ -1087,24 +1087,37 @@
     return parts;
   }
 
+  // full-resolution PNG as a Blob (shared by exportPNG and the toolbar
+  // Share button)
+  function renderPngBlob() {
+    return new Promise((resolve, reject) => {
+      const W = project.resW, H = project.resH;
+      const parts = buildExportParts(W, H);
+      if (!parts.length && !(LT.bgLayer(project).visible)) {
+        reject(new Error('nothing visible'));
+        return;
+      }
+      const off = document.createElement('canvas');
+      off.width = W; off.height = H;
+      compositeComposition(off.getContext('2d'), W, H, 0, false, parts);
+      off.toBlob((blob) => {
+        if (blob) resolve({ blob, W, H, n: parts.reduce((a, p) => a + (p.canvas ? 1 : 0), 0) });
+        else reject(new Error('PNG encode failed'));
+      }, 'image/png');
+    });
+  }
+
   async function exportPNG() {
     statusEl.textContent = 'rendering full resolution…';
     await new Promise((r) => setTimeout(r, 30));
     const t0 = performance.now();
-    const W = project.resW, H = project.resH;
-    const off = document.createElement('canvas');
-    off.width = W; off.height = H;
-    const parts = buildExportParts(W, H);
-    if (!parts.length && !(LT.bgLayer(project).visible)) {
-      statusEl.textContent = 'export failed: nothing visible';
-      return;
-    }
-    compositeComposition(off.getContext('2d'), W, H, 0, false, parts);
-    off.toBlob((blob) => {
+    try {
+      const { blob, W, H, n } = await renderPngBlob();
       downloadBlob(blob, `${fileBase()}-${W}x${H}.png`);
-      const n = parts.reduce((a, p) => a + (p.canvas ? 1 : 0), 0);
       statusEl.textContent = `PNG saved · ${n} layer${n > 1 ? 's' : ''} · ${W}x${H} · ${(performance.now() - t0).toFixed(0)} ms`;
-    }, 'image/png');
+    } catch (err) {
+      statusEl.textContent = 'export failed: ' + err.message;
+    }
   }
 
   /*
@@ -1116,7 +1129,8 @@
    */
   function prepareLoopExport(W, H, matte) {
     const parts = buildExportParts(W, H);
-    if (!parts.length) return null;
+    // zero pattern layers is fine (background-only GIF/APNG = one static
+    // frame of the background fill)
     const plan = LT.planLoop(parts.map((p) => (p.animator && p.animator.periodMs) || 0));
     const bg = LT.bgLayer(project);
     const outC = document.createElement('canvas');
@@ -1162,6 +1176,43 @@
     return { W, H, octx, renderAt, plan, parts };
   }
 
+  // seamless GIF as raw bytes (shared by exportGIF and the toolbar Share
+  // button); onStep(optional) receives progress text for a button label
+  async function renderGifBytes(onStep) {
+    const step = (t) => { if (onStep) onStep(t); };
+    statusEl.textContent = 'rendering GIF frames…';
+    await tickAsync();
+    // GIF has no partial alpha: transparent projects are flattened on black
+    const prep = prepareLoopExport(project.resW, project.resH, '#000000');
+    if (!prep) throw new Error('GIF render failed');
+    const { W, H, octx, renderAt, plan } = prep;
+    const frames = plan.frames;
+    // one static frame (background-only project) still needs a sane delay
+    const delayCs = plan.frames === 1 ? Math.max(plan.delayCs, 50) : plan.delayCs;
+
+    // one global palette from a spread of sample frames keeps colors
+    // stable across the animation (no palette flicker)
+    const nS = Math.min(frames, 12);
+    const samples = [];
+    for (let s = 0; s < nS; s++) {
+      renderAt(Math.round((s * frames) / nS) * delayCs * 10);
+      samples.push(new Uint8ClampedArray(octx.getImageData(0, 0, W, H).data));
+      step(`palette ${Math.round(((s + 1) / nS) * 100)}%`);
+      await tickAsync();
+    }
+    const pal = Gif.buildPalette(samples, 256);
+    const map = Gif.createMapper(pal);
+    const writer = new Gif.GifWriter(W, H, pal, { loop: 0 });
+    writer.start();
+    for (let i = 0; i < frames; i++) {
+      renderAt(i * delayCs * 10);
+      writer.addFrame(map(octx.getImageData(0, 0, W, H).data, W, H), delayCs);
+      step(`${Math.round(((i + 1) / frames) * 100)}%`);
+      if ((i & 1) === 1) await tickAsync();
+    }
+    return { bytes: writer.finish(), frames, W, H, compressed: plan.compressed };
+  }
+
   let gifBusy = false;
   async function exportGIF() {
     if (gifBusy) return;
@@ -1169,40 +1220,14 @@
     const btn = $('gifBtn');
     const orig = btn.textContent;
     try {
-      statusEl.textContent = 'rendering GIF frames…';
-      await tickAsync();
-      // GIF has no partial alpha: transparent projects are flattened on black
-      const prep = prepareLoopExport(project.resW, project.resH, '#000000');
-      if (!prep) { statusEl.textContent = 'GIF export failed'; return; }
-      const { W, H, octx, renderAt, plan } = prep;
-      const frames = plan.frames, delayCs = plan.delayCs;
-
-      // one global palette from a spread of sample frames keeps colors
-      // stable across the animation (no palette flicker)
-      const nS = Math.min(frames, 12);
-      const samples = [];
-      for (let s = 0; s < nS; s++) {
-        renderAt(Math.round((s * frames) / nS) * delayCs * 10);
-        samples.push(new Uint8ClampedArray(octx.getImageData(0, 0, W, H).data));
-        btn.textContent = `palette ${Math.round(((s + 1) / nS) * 100)}%`;
-        await tickAsync();
-      }
-      const pal = Gif.buildPalette(samples, 256);
-      const map = Gif.createMapper(pal);
-      const writer = new Gif.GifWriter(W, H, pal, { loop: 0 });
-      writer.start();
-      for (let i = 0; i < frames; i++) {
-        renderAt(i * delayCs * 10);
-        writer.addFrame(map(octx.getImageData(0, 0, W, H).data, W, H), delayCs);
-        btn.textContent = `${Math.round(((i + 1) / frames) * 100)}%`;
-        if ((i & 1) === 1) await tickAsync();
-      }
-      const bytes = writer.finish();
+      const { bytes, frames, W, H, compressed } = await renderGifBytes((t) => { btn.textContent = t; });
       downloadBlob(new Blob([bytes], { type: 'image/gif' }),
         `${fileBase()}-live-${frames}f-${W}x${H}.gif`);
-      const note = plan.compressed < 1 ? ' · loop compressed' : '';
+      const note = compressed < 1 ? ' · loop compressed' : '';
       statusEl.textContent = `GIF saved · ${frames} frame${frames > 1 ? 's' : ''} · ${W}x${H} · ` +
         `${(bytes.length / 1048576).toFixed(1)} MB${note}`;
+    } catch (err) {
+      statusEl.textContent = 'GIF export failed: ' + err.message;
     } finally {
       btn.textContent = orig;
       gifBusy = false;
@@ -1239,6 +1264,50 @@
     } finally {
       btn.textContent = orig;
       apngBusy = false;
+    }
+  }
+
+  /* --------------------------------------------- share (OS share sheet) */
+
+  // Hand the wallpaper to the operating system's share sheet: PNG while
+  // nothing animates, seamless GIF otherwise. Devices/browsers without
+  // Web Share file support (or plain file:// pages) fall back to a normal
+  // download so the button always produces the wallpaper.
+  async function shareFiles(file, label) {
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file], title: project.name || 'Wallpaper', text: 'Wallpaper made with Geometric Wallpaper Studio' });
+        statusEl.textContent = 'shared ' + label;
+        return;
+      } catch (err) {
+        if (err && err.name === 'AbortError') { statusEl.textContent = 'share canceled'; return; }
+        // fall through to the download fallback for other errors
+      }
+    }
+    downloadBlob(file, file.name);
+    statusEl.textContent = 'sharing not supported here — downloaded ' + label + ' instead';
+  }
+
+  async function shareWallpaper() {
+    const animated = LT.patternLayers(project).some((l) => l.visible && l.animation !== 'none');
+    if (animated && gifBusy) { statusEl.textContent = 'busy — try again in a moment'; return; }
+    try {
+      if (animated) {
+        gifBusy = true;
+        try {
+          const { bytes, frames, W, H } = await renderGifBytes();
+          const file = new File([bytes], `${fileBase()}-live-${frames}f-${W}x${H}.gif`, { type: 'image/gif' });
+          await shareFiles(file, `GIF (${frames} frames)`);
+        } finally { gifBusy = false; }
+      } else {
+        statusEl.textContent = 'preparing PNG for share…';
+        await tickAsync();
+        const { blob, W, H } = await renderPngBlob();
+        const file = new File([blob], `${fileBase()}-${W}x${H}.png`, { type: 'image/png' });
+        await shareFiles(file, 'PNG');
+      }
+    } catch (err) {
+      statusEl.textContent = 'share failed: ' + (err && err.message ? err.message : err);
     }
   }
 
@@ -1303,8 +1372,9 @@
   // without losing the rest of their design. "Randomize layer" (Layers panel,
   // or the R key) randomizes the whole selected layer.
 
-  function randomizeBg() {
-    const rr = Math.random;
+  // shared random-background core (used by the section dice and by
+  // the toolbar's Random wallpaper button)
+  function applyRandomBg(rr) {
     const layer = LT.bgLayer(project);
     const src = rr() < 0.5 ? 'solid' : 'gradient';
     layer.bg.source = src;
@@ -1315,6 +1385,10 @@
       const vivid = ['#0b1020', '#071018', '#1a0e14', '#0e1a12', '#241432', '#10141c'];
       layer.bg.color = vivid[Math.floor(rr() * vivid.length)];
     }
+  }
+
+  function randomizeBg() {
+    applyRandomBg(Math.random);
     save('randomBg', 'Randomize background');
     syncControls(); recolorAll();
     notice('Randomized "Background" fill');
@@ -1450,15 +1524,9 @@
     notice(`Randomized animation of "${layer.name}"`);
   }
 
-  function randomize() {
-    const rr = Math.random;
-    const layer = SL();
-    if (!layer) return;
-    if (layer.type === 'background') {
-      randomizeBg();
-      return;
-    }
-    // pattern layer: everything at once
+  // shared random-pattern-layer core: everything at once (no save/sync —
+  // callers decide history granularity)
+  function applyRandomLayer(layer, rr) {
     layer.family = rr() < 0.35 ? 'hat' : TL.FAMILIES[1 + Math.floor(rr() * (TL.FAMILIES.length - 1))].id;
     const fam = TL.get(layer.family);
     layer.variant = fam.variants[Math.floor(rr() * fam.variants.length)].id;
@@ -1502,9 +1570,51 @@
       layer.effects[pick] = pick === 'glow' ? 20 + rr() * 25 : pick === 'grain' ? 8 + rr() * 12 : 25 + rr() * 25;
     }
     ensureMapValid(layer);
+  }
+
+  function randomize() {
+    const layer = SL();
+    if (!layer) return;
+    if (layer.type === 'background') {
+      randomizeBg();
+      return;
+    }
+    // pattern layer: everything at once
+    applyRandomLayer(layer, Math.random);
     save('randomLayer', 'Randomize layer');
     syncControls(); refresh();
     notice(`Randomized "${layer.name}" (selected layer only)`);
+  }
+
+  // toolbar: fresh project with ONLY the background layer (no patterns)
+  function newBackgroundProject() {
+    project = LT.defaultProject();
+    project.layers = [LT.bgLayer(project)];
+    project.selected = project.layers[0].id;
+    cache.clear(); drafts.clear();
+    save('newBg', 'New background-only project');
+    syncControls(); refresh();
+    notice('New background-only project');
+  }
+
+  // toolbar: one fresh randomized pattern layer over a randomized
+  // background — canvas size and project name are kept, history gets ONE
+  // undo step
+  function randomWallpaper() {
+    const rr = Math.random;
+    const keep = {
+      name: project.name, aspect: project.aspect,
+      orientation: project.orientation, resW: project.resW, resH: project.resH,
+    };
+    project = LT.defaultProject();
+    Object.assign(project, keep);
+    project.layers[1].theme.gradientId = GR.BUILTINS[0].id;
+    cache.clear(); drafts.clear();
+    applyRandomBg(rr);
+    applyRandomLayer(project.layers[1], rr);
+    save('randomWall', 'Random wallpaper');
+    syncControls(); refresh();
+    notice('Random wallpaper: background + one pattern layer');
   }
 
   function fullscreen() {
@@ -2387,7 +2497,32 @@
       drafts.clear();
       save('reset', 'Project reset'); syncControls(); refresh();
       notice('Project reset (all layers)');
+      closeModal();
     };
+
+    // ---- toolbar: new / random / share / canvas popover / about modal ----
+    $('newBgBtn').onclick = newBackgroundProject;
+    $('randWallBtn').onclick = randomWallpaper;
+    $('shareBtn').onclick = shareWallpaper;
+    const pop = $('canvasPop');
+    $('canvasBtn').onclick = (e) => {
+      e.stopPropagation();
+      pop.hidden = !pop.hidden;
+    };
+    pop.addEventListener('click', (e) => e.stopPropagation());
+    document.addEventListener('click', () => { if (!pop.hidden) pop.hidden = true; });
+    const modal = $('modalWrap');
+    const closeModal = () => { modal.hidden = true; };
+    $('aboutBtn').onclick = () => { modal.hidden = false; };
+    $('aboutClose').onclick = closeModal;
+    modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && (!modal.hidden || !pop.hidden)) {
+        closeModal();
+        pop.hidden = true;
+      }
+    });
+
     document.addEventListener('keydown', (e) => {
       const k = (e.key || '').toLowerCase();
       if ((e.ctrlKey || e.metaKey) && k === 'z' && !e.shiftKey) {
@@ -2408,7 +2543,40 @@
 
   /* ------------------------------------------------------- init */
 
+  // mobile usability: on small screens every section starts collapsed and a
+  // chip row (built here) opens + scrolls to a section. Desktop is untouched.
+  function initMobileNav() {
+    const narrow = window.matchMedia('(max-width: 760px)');
+    const nav = $('secNav');
+    const sections = [
+      ['sec-layers', 'Layers'], ['sec-tiling', 'Tiling'], ['sec-theme', 'Colors'],
+      ['sec-bgprops', 'Background'], ['sec-fx', 'Effects'], ['sec-anim', 'Animation'],
+      ['sec-export', 'Export'],
+    ];
+    for (const [id, label] of sections) {
+      const b = document.createElement('button');
+      b.className = 'chip';
+      b.textContent = label;
+      b.onclick = () => {
+        if (!narrow.matches) return;
+        document.querySelectorAll('#controls > details').forEach((d) => { d.open = d.id === id; });
+        const el = $(id);
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      };
+      nav.appendChild(b);
+    }
+    const collapseAll = () => {
+      if (narrow.matches) {
+        document.querySelectorAll('#controls > details').forEach((d) => { d.open = false; });
+      }
+    };
+    collapseAll();
+    if (narrow.addEventListener) narrow.addEventListener('change', collapseAll);
+    else if (narrow.addListener) narrow.addListener(collapseAll); // older API
+  }
+
   bind();
+  initMobileNav();
   syncControls();
   regenerate();
   history.reset(takeSnapshot()); // base entry: the state the page loaded with

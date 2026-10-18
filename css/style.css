@@ -1,4 +1,7 @@
-/* EinsteinWallpaper — studio UI (dark, minimal) */
+
+
+/* mobile-only section shortcut chips (built by js/app.js) */
+.secnav { display: none; }/* EinsteinWallpaper — studio UI (dark, minimal) */
 
 :root {
   --bg0: #0c0d11;
@@ -21,7 +24,81 @@ body {
   overflow: hidden;
 }
 
-#app { display: flex; height: 100vh; }
+#app { display: flex; flex-direction: column; height: 100vh; }
+#main { flex: 1; display: flex; min-height: 0; }
+
+/* ---------------- top toolbar ---------------- */
+#toolbar {
+  flex: none;
+  display: flex; align-items: center; flex-wrap: wrap;
+  gap: 8px; row-gap: 6px;
+  min-height: 50px; padding: 7px 12px;
+  background: var(--bg1); border-bottom: 1px solid var(--line);
+  z-index: 5;
+}
+.tgroup { display: flex; align-items: center; gap: 6px; flex: none; }
+.tgroup.right { margin-left: auto; }
+.tgroup.brand { min-width: 0; margin-right: 4px; }
+.tgroup.brand .logo-hat { width: 24px; height: 24px; }
+.tbtn {
+  height: 32px; padding: 0 11px;
+  font: inherit; font-weight: 600; font-size: 12px;
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--bg2); color: var(--text);
+  border: 1px solid var(--line); border-radius: 8px;
+  cursor: pointer; transition: all .12s; white-space: nowrap;
+}
+.tbtn:hover { border-color: #3a4b66; background: #212531; }
+.tbtn:disabled { opacity: .4; cursor: default; }
+.tbtn:disabled:hover { border-color: var(--line); background: var(--bg2); }
+.tbtn .tico { font-size: 13px; line-height: 1; }
+.tbtn.accent {
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  border: none; color: #0a1020;
+}
+.tbtn.accent:hover { filter: brightness(1.1); }
+.tbtn.share { border-color: #2b5a74; }
+.tbtn.share:hover { border-color: var(--accent); }
+#toolbar #projName {
+  width: 190px; padding: 6px 9px;
+  background: var(--bg2); color: var(--text);
+  border: 1px solid var(--line); border-radius: 7px;
+  outline: none; font: inherit; font-weight: 600;
+}
+#toolbar #projName:focus { border-color: #3a4b66; }
+#saveState {
+  flex: none; font-size: 10.5px; letter-spacing: .3px;
+  white-space: nowrap; font-variant-numeric: tabular-nums;
+}
+#saveState.ok { color: #6be3a2; }
+#saveState.warn { color: #ffe14d; }
+
+/* canvas settings popover anchored to the toolbar button */
+.popwrap { position: relative; }
+.pop {
+  position: absolute; top: calc(100% + 8px); left: 0; z-index: 60;
+  width: 300px; padding: 12px 14px 8px;
+  background: var(--bg2); border: 1px solid #3a4152; border-radius: 12px;
+  box-shadow: 0 14px 44px rgba(0,0,0,.55);
+}
+.pop[hidden] { display: none; }
+
+/* ---------------- about modal ---------------- */
+#modalWrap {
+  position: fixed; inset: 0; z-index: 900;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(4,5,9,.62); padding: 16px;
+}
+#modalWrap[hidden] { display: none; }
+#aboutCard {
+  width: min(560px, 100%); max-height: 86vh; overflow-y: auto;
+  background: var(--bg1); border: 1px solid #3a4152; border-radius: 14px;
+  padding: 20px 22px; box-shadow: 0 24px 80px rgba(0,0,0,.6);
+}
+#aboutCard h2 { margin: 0 0 2px; font-size: 17px; }
+#aboutCard .sub { margin: 0 0 10px; color: var(--accent); font-size: 11.5px; letter-spacing: .3px; }
+#aboutCard p { color: var(--dim); font-size: 12.5px; line-height: 1.6; }
+#aboutCard b { color: var(--text); }
 
 /* ---------------- sidebar ---------------- */
 #sidebar {
@@ -31,47 +108,6 @@ body {
   display: flex; flex-direction: column;
   z-index: 2;
 }
-#sidebar header {
-  padding: 16px 16px 12px;
-  border-bottom: 1px solid var(--line);
-}
-.logo { display: flex; gap: 10px; align-items: center; }
-.logo h1 { font-size: 15px; margin: 0; letter-spacing: .2px; }
-.logo .sub { margin: 1px 0 0; color: var(--dim); font-size: 11px; }
-.logo-hat {
-  width: 34px; height: 34px; flex: none;
-  background:
-    conic-gradient(from 210deg at 55% 45%,
-      #5bc8ff 0 60deg, #8f7bff 60deg 120deg, #ff8bd2 120deg 180deg,
-      #ffe14d 180deg 240deg, #6be3a2 240deg 300deg, #ff8a5b 300deg 360deg);
-  clip-path: polygon(20% 78%, 8% 46%, 26% 20%, 56% 10%, 82% 26%, 92% 56%, 68% 84%, 40% 90%);
-  display: inline-block;
-}
-/* ---------------- project bar (top of sidebar) ---------------- */
-#projectBar {
-  padding: 10px 16px 12px;
-  border-bottom: 1px solid var(--line);
-}
-#projectBar .prow {
-  display: flex; gap: 8px; align-items: center;
-  margin: 0 0 8px;
-}
-#projectBar .prow:last-of-type { margin-bottom: 0; }
-#projName {
-  flex: 1; min-width: 0; padding: 7px 9px;
-  background: var(--bg2); color: var(--text);
-  border: 1px solid var(--line); border-radius: 7px;
-  outline: none; font: inherit; font-weight: 600;
-}
-#projName:focus { border-color: #3a4b66; }
-#saveState {
-  flex: none; font-size: 10.5px; letter-spacing: .3px;
-  white-space: nowrap; font-variant-numeric: tabular-nums;
-}
-#saveState.ok { color: #6be3a2; }
-#saveState.warn { color: #ffe14d; }
-#projectBar .prow.btns { margin-top: 8px; }
-#projectBar .prow.btns .btn { flex: 1; padding: 6px 4px; }
 
 /* dice buttons: section-scoped randomizers, live in the summary row */
 .dice {
@@ -236,11 +272,71 @@ label.check input { accent-color: var(--accent); }
   color: var(--dim); font-size: 11.5px; font-variant-numeric: tabular-nums;
 }
 
-/* ---------------- responsive ---------------- */
+/* ---------------- responsive / mobile ---------------- */
 @media (max-width: 760px) {
-  #app { flex-direction: column; }
-  #sidebar { width: 100%; min-width: 0; max-height: 46vh; border-right: none; border-bottom: 1px solid var(--line); }
+  /* toolbar: compact, wraps to two rows, icon-only buttons */
+  #toolbar { padding: 6px 8px; gap: 6px; }
+  .tgroup.brand .logo-hat { display: none; }
+  #toolbar #projName { width: 110px; }
+  .tbtn { height: 36px; padding: 0 10px; font-size: 13px; }
+  .tbtn .tlabel { display: none; }
+  .tbtn .tico { font-size: 15px; }
+
+  /* canvas on top, controls sheet at the bottom */
+  #main { flex-direction: column; }
+  #stage { order: -1; }
+  #sidebar {
+    width: 100%; min-width: 0; max-height: 47vh;
+    border-right: none; border-top: 1px solid var(--line);
+  }
   #canvasWrap { padding: 6px; }
+  #status { font-size: 12px; padding: 8px 10px 12px; }
+
+  /* section shortcut chips (quick jump, no more endless scrolling) */
+  .secnav {
+    display: flex; gap: 6px; overflow-x: auto; padding: 8px 10px;
+    border-bottom: 1px solid var(--line); flex: none;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .secnav::-webkit-scrollbar { display: none; }
+  .secnav .chip { flex: none; }
+
+  /* bigger, touch-friendly controls */
+  summary { padding: 13px 14px; font-size: 12.5px; }
+  details .body { padding: 2px 14px 16px; }
+  select, input[type="number"] { min-height: 38px; font-size: 14px; }
+  input[type="range"] { height: 22px; background: transparent; }
+  input[type="range"]::-webkit-slider-runnable-track {
+    height: 4px; border-radius: 2px; background: #2a2f3d;
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    width: 22px; height: 22px; margin-top: -9px;
+  }
+  input[type="range"]::-moz-range-track { height: 4px; border-radius: 2px; background: #2a2f3d; }
+  input[type="range"]::-moz-range-thumb {
+    width: 18px; height: 18px; border: 2px solid #0c0d11; background: var(--accent);
+  }
+  .btn { min-height: 38px; }
+  .btn.mini { min-height: 34px; padding: 6px 12px; font-size: 12.5px; }
+  .chip { padding: 8px 12px; font-size: 12.5px; }
+  .layerrow { padding: 9px 10px; }
+  .layerrow .eye { width: 30px; height: 30px; font-size: 14px; }
+  .famgrid { grid-template-columns: repeat(4, 1fr); gap: 7px; }
+  .fam { padding: 9px 2px 7px; font-size: 9px; }
+  .fam svg { width: 26px; height: 26px; }
+  .swatch { height: 32px; }
+  .tplswatches .tpl { width: 32px; height: 32px; }
+  .stoplist { max-height: 240px; }
+  .stoprow input[type="color"] { width: 44px; height: 34px; }
+  .stoprow .hextext { min-height: 34px; font-size: 12.5px; }
+  .stoprow .postext { width: 62px; min-height: 34px; }
+  .mini-btn { width: 30px; height: 34px; }
+  .dice { width: 30px; height: 30px; font-size: 14px; margin-left: 8px; }
+  .infotip { width: 22px; height: 22px; margin-left: 8px; font: italic 700 12px/20px Georgia, "Times New Roman", serif; }
+
+  /* canvas settings popover: compact sheet under the toolbar */
+  .pop { width: min(340px, calc(100vw - 20px)); }
 }
 
 /* ---------------- family selector grid ---------------- */

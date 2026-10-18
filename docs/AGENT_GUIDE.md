@@ -3,7 +3,9 @@
 This guide is for **AI agents and power users** who want to create wallpapers
 by writing a JSON file instead of clicking through the UI. Generate the JSON,
 give it to the user as a `.json` file, and they load it with **Load** in the
-project bar at the top of the sidebar. The whole application state
+top toolbar (project name, New background-only, Random one-layer
+wallpaper, undo/redo, canvas settings, save/load, share, fullscreen, about).
+The whole application state
 (layers, colors, effects, animation, canvas) lives in that one file.
 
 The app is fully offline and has no build step; the JSON is loaded and
@@ -51,7 +53,7 @@ reload the page. The UI path is preferred.
 
 | Field | Type | Default | Notes |
 |---|---|---|---|
-| `name` | string | `"Untitled wallpaper"` | free-form project name, ≤ 60 chars; shown in the project bar and used for saved-file/export filenames |
+| `name` | string | `"Untitled wallpaper"` | free-form project name, ≤ 60 chars; shown in the top toolbar and used for saved-file/export filenames |
 | `aspect` | string | `"16:9"` | One of `16:9, 16:10, 4:3, 5:4, 3:2, 21:9, 32:9, 1:1, 9:16, 9:19.5, 9:20` |
 | `orientation` | string | `"landscape"` | `landscape` \| `portrait` |
 | `resW`, `resH` | int | 1920 × 1080 | Export resolution in pixels, 64–8192 |
@@ -60,7 +62,9 @@ reload the page. The UI path is preferred.
 
 These four canvas fields are the **only global visual settings**. Everything
 else belongs to a layer. At most **8 pattern layers** are kept (extras are
-dropped); at least one pattern layer is always present.
+dropped). Zero pattern layers is also valid — a background-only project (the
+toolbar's **New** button creates one); it renders and exports just the
+background fill. `selected` may point at the background layer in that case.
 
 ---
 

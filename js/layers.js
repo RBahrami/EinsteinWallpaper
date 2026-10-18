@@ -367,9 +367,10 @@
         pats.push(createPattern(l));
       }
     }
-    // the background layer is ALWAYS the bottom of the stack
+    // the background layer is ALWAYS the bottom of the stack.
+    // Zero pattern layers is a valid project (toolbar "New": background
+    // only), so nothing is forced back in here.
     proj.layers = [bg || createBackground(), ...pats];
-    if (!pats.length) proj.layers.push(createPattern({ name: 'Pattern 1', _n: 1 }));
 
     // unique ids
     const seen = new Set();
