@@ -1,5 +1,5 @@
 /*
- * gif.js — dependency-free animated GIF89a encoder for EinsteinWallpaper.
+ * gif.js — dependency-free animated GIF89a encoder for Tessellate.
  *
  * Everything (palette quantization, Floyd-Steinberg dithering, LZW
  * compression, container assembly) is implemented here from the GIF89a

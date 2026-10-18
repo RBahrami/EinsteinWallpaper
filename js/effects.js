@@ -1,5 +1,5 @@
 /*
- * effects.js — post-processing visual effects pipeline for EinsteinWallpaper.
+ * effects.js — post-processing visual effects pipeline for Tessellate.
  *
  * Pipeline (shared by live preview, PNG export and animated exports):
  *   1. paint background (solid color or gradient) onto the target canvas

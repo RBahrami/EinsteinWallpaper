@@ -1,5 +1,5 @@
 /*
- * apng.js — dependency-free animated APNG encoder for EinsteinWallpaper.
+ * apng.js — dependency-free animated APNG encoder for Tessellate.
  *
  * APNG (Animated PNG) is a strict superset of PNG: ordinary decoders show
  * the first frame, APNG-aware ones (all modern browsers, macOS, most

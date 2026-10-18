@@ -1,6 +1,6 @@
 /*
  * render.js — scene building, coloring, drawing, animation and export
- * for EinsteinWallpaper.
+ * for Tessellate.
  *
  * Two scene kinds share one coloring/LUT/effects pipeline:
  *   kind 'hat'  — aperiodic Einstein hat (metatile substitution, unchanged math)

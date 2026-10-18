@@ -1,5 +1,5 @@
 /*
- * history.js — undo/redo history for EinsteinWallpaper.
+ * history.js — undo/redo history for Tessellate.
  *
  * Snapshot-based: the app stores a deep-cloned snapshot of the full project
  * state (project + runtime drafts) after every committed change, keyed by a

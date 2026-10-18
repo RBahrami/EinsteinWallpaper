@@ -1,5 +1,5 @@
 /*
- * tilings.js — geometric tiling families for EinsteinWallpaper.
+ * tilings.js — geometric tiling families for Tessellate.
  *
  * Each family exposes:
  *   id, name, icon (inline SVG), variants [{id,name}],

@@ -1,7 +1,7 @@
 # Tessellate — Geometric Wallpaper Studio 🎩
 
 **Tessellate** (formerly "Einstein Wallpaper" / "Geometric Wallpaper Studio" — the
-repository keeps its original name `EinsteinWallpaper`) generates wallpapers from the
+repository is `RBahrami/Tessellate`) generates wallpapers from the
 **Einstein tile** (the aperiodic "hat" monotile discovered in 2023 by David Smith,
 Joseph Samuel Myers, C. S. Kaplan and Chaim Goodman-Strauss) — **plus 13 more
 mathematically verified tiling families** — and composes them in a **multi-layer
@@ -265,7 +265,7 @@ wallpapers.
 Option A — GitHub Pages (recommended):
 
 1. Repo → *Settings* → *Pages* → deploy from branch `main`, folder `/ (root)`.
-2. Open `https://rbahrami.github.io/EinsteinWallpaper/`.
+2. Open `https://rbahrami.github.io/Tessellate/`.
 
 Option B — locally: just open `index.html` in any modern browser (double-click it).
 No build step, no server, no dependencies.

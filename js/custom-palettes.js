@@ -1,5 +1,5 @@
 /*
- * custom-palettes.js — user-defined palette store for EinsteinWallpaper.
+ * custom-palettes.js — user-defined palette store for Tessellate.
  *
  * Custom palette: { id, name, colors: ['#hex', ...], bg: '#hex', outline: '#hex'|null }
  *   outline === null -> automatic outline color (existing behaviour).

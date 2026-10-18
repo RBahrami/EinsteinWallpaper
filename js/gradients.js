@@ -1,5 +1,5 @@
 /*
- * gradients.js — multi-stop gradient engine + persistence for EinsteinWallpaper.
+ * gradients.js — multi-stop gradient engine + persistence for Tessellate.
  *
  * A gradient: { id, name, type: 'linear'|'radial'|'conic', angle: deg,
  *               stops: [{ pos: 0..1, color: '#rrggbb' }] }

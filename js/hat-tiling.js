@@ -10,7 +10,7 @@
  * The hat-shaped leaves at the bottom of the expansion form an exact,
  * non-periodic tiling of the plane.
  *
- * Original implementation for the EinsteinWallpaper project.
+ * Original implementation for the Tessellate project.
  * Runs in the browser (window.HatTiling) and in Node (module.exports).
  */
 (function (root) {

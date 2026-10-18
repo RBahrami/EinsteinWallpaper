@@ -1,5 +1,5 @@
 /*
- * palettes.js — curated color palette library for EinsteinWallpaper.
+ * palettes.js — curated color palette library for Tessellate.
  * Each palette: { name, bg, line (optional outline), colors: [...] }
  */
 (function (root) {

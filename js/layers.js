@@ -1,5 +1,5 @@
 /*
- * layers.js — layer model for the EinsteinWallpaper multi-layer system.
+ * layers.js — layer model for the Tessellate multi-layer system.
  *
  * A project = { version: 2, name, aspect, orientation, resW, resH,
  * selected, layers: [...] }

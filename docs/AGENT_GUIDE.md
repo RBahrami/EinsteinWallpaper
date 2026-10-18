@@ -1,4 +1,4 @@
-# Agent Guide — generating Tessellate (EinsteinWallpaper) projects as JSON
+# Agent Guide — generating Tessellate (formerly EinsteinWallpaper) projects as JSON
 
 This guide is for **AI agents and power users** who want to create wallpapers
 by writing a JSON file instead of clicking through the UI. Generate the JSON,
