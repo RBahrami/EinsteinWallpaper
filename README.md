@@ -1,5 +1,7 @@
 # Tessellate — Geometric Wallpaper Studio 🎩
 
+![README views](https://hits.sh/github.com/RBahrami/Tessellate.svg?style=flat-square)
+
 **Tessellate** (formerly "Einstein Wallpaper" / "Geometric Wallpaper Studio" — the
 repository is `RBahrami/Tessellate`) generates wallpapers from the
 **Einstein tile** (the aperiodic "hat" monotile discovered in 2023 by David Smith,
@@ -396,7 +398,9 @@ acceptance, and publication are the owner's.
   loads a single anonymous, cookie-free analytics beacon (Cloudflare Web
   Analytics) so the author can see aggregate visit counts — no cookies, no
   personal data, no cross-site tracking. Local/offline use of the app (opening
-  `index.html` directly) loads nothing at all.
+  `index.html` directly) loads nothing at all. Additionally, this README embeds
+  a public hit-counter badge (hits.sh) that tallies README views on GitHub — a
+  visible counter, separate from the author's private analytics dashboard.
 - **Third-party live-wallpaper tools.** The live-wallpaper how-to names
   external applications as a convenience; follow their own terms and review
   their permissions before installing anything.
